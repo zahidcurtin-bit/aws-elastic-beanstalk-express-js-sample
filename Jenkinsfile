@@ -70,6 +70,7 @@ pipeline {
                 }
             }
         }
+
     }
 
     // post build actions
@@ -82,7 +83,9 @@ pipeline {
             echo "Build failed. check log"
         }
         always {
-            sh 'docker image prune -f || true'
+		script {
+            		sh 'docker image prune -f || true'
+		}
         }
     }
 
