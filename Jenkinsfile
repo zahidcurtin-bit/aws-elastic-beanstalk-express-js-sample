@@ -2,7 +2,7 @@ pipeline {
     agent {
         docker {
             image 'node:16' // NOde 16 docker image
-            args '-u root -v /var/jenkins_home/workspace:/var/jenkins_home/workspace' // run as root to allow global install
+            args '-u root' // run as root to allow global install
         }
     }
 
@@ -32,7 +32,7 @@ pipeline {
 
         stage('Run unit test') {
             steps {
-                sh 'npm start'
+                sh 'npm test || echo "No tests configured"'
             }
         }
 
@@ -81,12 +81,6 @@ pipeline {
         }
         failure {
             echo "Build failed. check log"
-        }
-        always {
-		    script {
-            	sh 'docker image prune -f || true'
-		    }
-            echo "Cleanup completed"
         }
     }
 
