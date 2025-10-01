@@ -1,10 +1,5 @@
 pipeline {
-    agent {
-        docker {
-            image 'node:16' // NOde 16 docker image
-            args '-u root' // run as root to allow global install
-        }
-    }
+    agent any  
 
     // environment variables
     environment {
