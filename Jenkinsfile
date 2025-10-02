@@ -2,7 +2,7 @@ pipeline {
     agent {
         docker {
             image 'node:16' // NOde 16 docker image
-            args '-u root' // run as root to allow global install
+            args '--privileged -v /var/run/docker.sock:/var/run/docker.sock' // run as root to allow global install
         }
     }
 
@@ -18,6 +18,24 @@ pipeline {
 
     // pipline stages
     stages {
+        stage('Environment Setup') {
+            steps {
+                echo 'Setting up the environment...'
+                sh 'echo "Current Environment Variables:" && env'
+                sh 'echo "Working Directory:" && pwd'
+                sh 'echo "Contents of Workspace:" && ls -al /var/jenkins_home/workspace'
+                sh 'echo "Current User:" && whoami'
+            }
+        }
+
+        stage('Verify Node.js and npm Installation') {
+            steps {
+                echo 'Verifying installations of Node.js and npm...'
+                sh 'node --version || echo "Node.js is not installed!"'
+                sh 'npm --version || echo "npm is not installed!"'
+            }
+        }
+        
         stage('Checkout code'){
             steps {
                 checkout scm   // pull code from repo
