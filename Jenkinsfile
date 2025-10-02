@@ -1,7 +1,7 @@
 pipeline {
     agent {
         docker {
-            image 'node:16'
+            image 'your-custom-node-docker:latest' // replace with your built image
             args '--link dind:dind -e DOCKER_HOST=tcp://dind:2376'
         }
     }
@@ -24,15 +24,18 @@ pipeline {
             }
         }
 
-        stage('Test Docker Bind') {
+        stage('Test Docker CLI') {
             steps {
-                sh 'docker run --rm -v $PWD:/app node:16 ls /app'
+                // List Docker version to confirm CLI works
+                sh 'docker version'
+                // Optionally, list containers in DinD to test connection
+                sh 'docker ps'
             }
         }
 
         stage('Build Docker Image') {
             steps {
-                sh 'docker build -t my-node-app .' 
+                sh 'docker build -t my-node-app .'
             }
         }
     }
