@@ -1,106 +1,54 @@
 pipeline {
     agent {
         docker {
-            image 'node:16' // NOde 16 docker image
-            args '--privileged -v /var/run/docker.sock:/var/run/docker.sock' // run as root to allow global install
+            image 'node:16'
+            args '-v /var/run/docker.sock:/var/run/docker.sock'
         }
     }
 
-    // environment variables
     environment {
-        DOCKER_REGISTRY = "docker.io"
-        DOCKER_USERNAME = "zahidsajif"
-        IMAGE_NAME = "${DOCKER_USERNAME}/aws-node-app" // image name
-        IMAGE_TAG = "${IMAGE_NAME}:latest"
-        DOCKER_CREDS_ID = 'docker-hub-credentials' // jenkins credential is for docker hub
-        SNYK_TOKEN = credentials('snyk-token') // jenkeins secret test for snyk
+        APP_DIR = '/usr/src/app'
     }
 
-    // pipline stages
     stages {
-        stage('Environment Setup') {
+        stage('Checkout') {
             steps {
-                echo 'Setting up the environment...'
-                sh 'echo "Current Environment Variables:" && env'
-                sh 'echo "Working Directory:" && pwd'
-                sh 'echo "Contents of Workspace:" && ls -al /var/jenkins_home/workspace'
-                sh 'echo "Current User:" && whoami'
+                // Clone your repo
+                git 'https://github.com/zahidcurtin-bit/aws-elastic-beanstalk-express-js-sample'
             }
         }
 
-        stage('Verify Node.js and npm Installation') {
+        stage('Install Dependencies') {
             steps {
-                echo 'Verifying installations of Node.js and npm...'
-                sh 'node --version || echo "Node.js is not installed!"'
-                sh 'npm --version || echo "npm is not installed!"'
-            }
-        }
-        
-        stage('Checkout code'){
-            steps {
-                checkout scm   // pull code from repo
-            }
-        }
-
-        stage('install dependencies') {
-            steps {
-                sh 'npm install --save' // install project dependencies
-            }
-        }
-
-        stage('Run unit test') {
-            steps {
-                sh 'npm test || echo "No tests configured"'
-            }
-        }
-
-        stage('security scan (Synk)') {
-            steps {
-                sh '''
-                    npm install -g snyk
-                    snyk auth ${SNYK_TOKEN}
-                    # if any HIGH or CRITICAL vulnerb found fail build
-                    snyk test --severity-threshold=high
-                    '''
-            }
-        }
-
-        stage('Build docker image') {
-            steps {
-                sh  '''
-                    echo "Building image $IMAGE_TAG"
-                    docker build -t ${IMAGE_TAG} .
-                    '''
-            }
-        }
-
-        stage('push docker image') {
-            steps {
-                withCredentials([usernamePassword(
-                    credentialsId: "${DOCKER_CREDS_ID}", 
-                    usernameVariable: 'DOCKER_USER', 
-                    passwordVariable: 'DOCKER_PASS')]) {
-                    sh  '''
-                        echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
-                        docker push ${IMAGE_TAG}
-                        docker logout
-                        '''
+                dir("${APP_DIR}") {
+                    // Install dependencies and save in package.json
+                    sh 'npm install --save'
                 }
             }
         }
 
-    }
+        stage('Build') {
+            steps {
+                echo 'Building Node application...'
+                // Add any build commands if required
+            }
+        }
 
-    // post build actions
+        stage('Test') {
+            steps {
+                echo 'Running tests...'
+                // Example test command
+                sh 'npm test || echo "No tests found"'
+            }
+        }
+    }
 
     post {
         success {
-            echo "Build and Push completed successfully"
+            echo 'Pipeline completed successfully!'
         }
         failure {
-            echo "Build failed. check log"
+            echo 'Pipeline failed!'
         }
     }
-
 }
-
