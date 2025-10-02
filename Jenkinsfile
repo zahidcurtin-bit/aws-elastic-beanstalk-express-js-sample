@@ -1,7 +1,7 @@
 pipeline {
     agent {
         docker {
-            image 'node:16'  // Use Alpine Linux (smaller and updated)
+            image 'node:16-alpine'  // Use Alpine Linux (smaller and updated)
             args '--privileged -v /var/run/docker.sock:/var/run/docker.sock'
         }
     }
