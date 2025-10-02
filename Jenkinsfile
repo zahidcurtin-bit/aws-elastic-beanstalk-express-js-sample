@@ -2,26 +2,21 @@ pipeline {
     agent any
     
     stages {
-        stage('Diagnose') {
+        stage('Verify Docker') {
             steps {
                 sh '''
-                    echo "=== PATH ==="
-                    echo $PATH
-                    
-                    echo "=== Which Docker ==="
-                    which docker || echo "docker not found in PATH"
-                    
-                    echo "=== Find Docker ==="
-                    find /usr -name docker 2>/dev/null || echo "docker binary not found"
-                    
-                    echo "=== Docker Version ==="
-                    /usr/bin/docker --version || echo "docker not executable at /usr/bin/docker"
-                    
-                    echo "=== User ==="
-                    whoami
-                    
-                    echo "=== Groups ==="
-                    groups
+                    docker --version
+                    docker info
+                    docker run hello-world
+                '''
+            }
+        }
+        
+        stage('Test Node 16') {
+            steps {
+                sh '''
+                    docker pull node:16
+                    docker run --rm node:16 node --version
                 '''
             }
         }
