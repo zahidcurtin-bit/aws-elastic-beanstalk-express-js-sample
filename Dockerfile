@@ -1,13 +1,17 @@
+# Use Node 16 as base
 FROM node:16
 
-# Install Docker CLI
-RUN curl -fsSLO https://get.docker.com/builds/Linux/x86_64/docker-17.04.0-ce.tgz \
-    && tar xzvf docker-17.04.0-ce.tgz \
-    && mv docker/docker /usr/local/bin \
-    && rm -r docker docker-17.04.0-ce.tgz
+# Set working directory
+WORKDIR /usr/src/app
 
-WORKDIR /app
+# Copy package files first for caching
 COPY package*.json ./
+
+# Install dependencies
 RUN npm install --save
+
+# Copy the rest of the app
 COPY . .
-CMD ["node", "index.js"]
+
+# Default command (can be overridden)
+CMD ["node", "app.js"]
