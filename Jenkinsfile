@@ -1,61 +1,20 @@
 pipeline {
-    agent any
-    
+    agent any   // runs on Jenkins host which already has git
     stages {
-        stage('Verify Environment') {
+        stage('Checkout') {
             steps {
-                sh '''
-                    echo "Node version in container:"
-                    docker run --rm node:16 node --version
-                    echo "NPM version in container:"
-                    docker run --rm node:16 npm --version
-                '''
+                checkout scm
             }
         }
-        
-        stage('Install Dependencies') {
-            steps {
-                sh '''
-                    docker run --rm \
-                    -v ${WORKSPACE}:/app \
-                    -w /app \
-                    node:16 \
-                    npm install --save
-                '''
-            }
-        }
-        
-        stage('List Dependencies') {
-            steps {
-                sh '''
-                    docker run --rm \
-                    -v ${WORKSPACE}:/app \
-                    -w /app \
-                    node:16 \
-                    npm list --depth=0
-                '''
-            }
-        }
-        
         stage('Build') {
-            steps {
-                sh '''
-                    docker run --rm \
-                    -v ${WORKSPACE}:/app \
-                    -w /app \
-                    node:16 \
-                    npm run build || echo "No build script defined"
-                '''
+            agent {
+                docker {
+                    image 'node:16'
+                }
             }
-        }
-    }
-    
-    post {
-        success {
-            echo 'Pipeline completed successfully!'
-        }
-        failure {
-            echo 'Pipeline failed!'
+            steps {
+                sh 'npm install --save'
+            }
         }
     }
 }
