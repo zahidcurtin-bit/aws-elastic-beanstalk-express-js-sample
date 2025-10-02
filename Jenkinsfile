@@ -2,18 +2,14 @@ pipeline {
     agent {
         docker {
             image 'node:16'
-            args '-v /var/run/docker.sock:/var/run/docker.sock'
+            args '--link dind:dind -e DOCKER_HOST=tcp://dind:2376'
         }
     }
     stages {
-        stage('Install Dependencies') {
+        stage('Build') {
             steps {
+                sh 'docker version'
                 sh 'npm install --save'
-            }
-        }
-        stage('Build Docker Image') {
-            steps {
-                sh 'docker --version'  // now works
             }
         }
     }
