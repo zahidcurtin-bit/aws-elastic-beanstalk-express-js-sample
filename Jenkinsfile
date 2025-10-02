@@ -2,53 +2,44 @@ pipeline {
     agent {
         docker {
             image 'node:16'
-            args '-v /var/run/docker.sock:/var/run/docker.sock'
+            args '-v /var/run/docker.sock:/var/run/docker.sock' // optional if you need Docker in Docker
         }
     }
 
     environment {
-        APP_DIR = '/usr/src/app'
+        APP_NAME = 'my-node16-app'
     }
 
     stages {
         stage('Checkout') {
             steps {
-                // Clone your repo
-                git 'https://github.com/zahidcurtin-bit/aws-elastic-beanstalk-express-js-sample'
+                checkout scm
             }
         }
 
         stage('Install Dependencies') {
             steps {
-                dir("${APP_DIR}") {
-                    // Install dependencies and save in package.json
-                    sh 'npm install --save'
-                }
+                sh 'npm install --save'
+            }
+        }
+
+        stage('Run Tests') {
+            steps {
+                sh 'npm test || echo "No tests defined"'
             }
         }
 
         stage('Build') {
             steps {
-                echo 'Building Node application...'
-                // Add any build commands if required
-            }
-        }
-
-        stage('Test') {
-            steps {
-                echo 'Running tests...'
-                // Example test command
-                sh 'npm test || echo "No tests found"'
+                sh 'echo "Building the app..."'
+                // Add any build steps here if required
             }
         }
     }
 
     post {
-        success {
-            echo 'Pipeline completed successfully!'
-        }
-        failure {
-            echo 'Pipeline failed!'
+        always {
+            echo 'Pipeline finished.'
         }
     }
 }
