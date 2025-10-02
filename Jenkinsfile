@@ -1,36 +1,50 @@
 pipeline {
     agent {
-        label 'docker'  // Use Jenkins agent labeled with 'docker'
+        docker {
+            image 'node:16' // NOde 16 docker image
+            args '--privileged -v /var/run/docker.sock:/var/run/docker.sock' // run as root to allow global install
+        }
     }
 
+    // environment variables
     environment {
         DOCKER_REGISTRY = "docker.io"
         DOCKER_USERNAME = "zahidsajif"
-        IMAGE_NAME = "${DOCKER_USERNAME}/aws-node-app"
+        IMAGE_NAME = "${DOCKER_USERNAME}/aws-node-app" // image name
         IMAGE_TAG = "${IMAGE_NAME}:latest"
-        DOCKER_CREDS_ID = 'docker-hub-credentials'
-        SNYK_TOKEN = credentials('snyk-token')
+        DOCKER_CREDS_ID = 'docker-hub-credentials' // jenkins credential is for docker hub
+        SNYK_TOKEN = credentials('snyk-token') // jenkeins secret test for snyk
     }
 
+    // pipline stages
     stages {
         stage('Environment Setup') {
             steps {
                 echo 'Setting up the environment...'
-                sh 'echo "Docker version:" && docker --version'
-                sh 'echo "Node version:" && node --version'
-                sh 'echo "npm version:" && npm --version'
-            }
-        }
-        
-        stage('Checkout code') {
-            steps {
-                checkout scm
+                sh 'echo "Current Environment Variables:" && env'
+                sh 'echo "Working Directory:" && pwd'
+                sh 'echo "Contents of Workspace:" && ls -al /var/jenkins_home/workspace'
+                sh 'echo "Current User:" && whoami'
             }
         }
 
-        stage('Install dependencies') {
+        stage('Verify Node.js and npm Installation') {
             steps {
-                sh 'npm install --save'
+                echo 'Verifying installations of Node.js and npm...'
+                sh 'node --version || echo "Node.js is not installed!"'
+                sh 'npm --version || echo "npm is not installed!"'
+            }
+        }
+        
+        stage('Checkout code'){
+            steps {
+                checkout scm   // pull code from repo
+            }
+        }
+
+        stage('install dependencies') {
+            steps {
+                sh 'npm install --save' // install project dependencies
             }
         }
 
@@ -40,40 +54,44 @@ pipeline {
             }
         }
 
-        stage('Security scan (Snyk)') {
+        stage('security scan (Synk)') {
             steps {
                 sh '''
                     npm install -g snyk
                     snyk auth ${SNYK_TOKEN}
+                    # if any HIGH or CRITICAL vulnerb found fail build
                     snyk test --severity-threshold=high
-                '''
+                    '''
             }
         }
 
         stage('Build docker image') {
             steps {
-                sh '''
+                sh  '''
                     echo "Building image $IMAGE_TAG"
                     docker build -t ${IMAGE_TAG} .
-                '''
+                    '''
             }
         }
 
-        stage('Push docker image') {
+        stage('push docker image') {
             steps {
                 withCredentials([usernamePassword(
                     credentialsId: "${DOCKER_CREDS_ID}", 
                     usernameVariable: 'DOCKER_USER', 
                     passwordVariable: 'DOCKER_PASS')]) {
-                    sh '''
+                    sh  '''
                         echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
                         docker push ${IMAGE_TAG}
                         docker logout
-                    '''
+                        '''
                 }
             }
         }
+
     }
+
+    // post build actions
 
     post {
         success {
@@ -83,4 +101,6 @@ pipeline {
             echo "Build failed. check log"
         }
     }
+
 }
+
