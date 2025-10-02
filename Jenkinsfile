@@ -1,58 +1,46 @@
 pipeline {
     agent {
         docker {
-            image 'node:16-alpine'  // Node 16 Docker image as build agent
-            args '--privileged'     // Optional: for additional permissions
+            image 'node:16-alpine'
+            args '--privileged -v /var/run/docker.sock:/var/run/docker.sock'
         }
     }
 
     environment {
-        // Docker registry configuration
         DOCKER_REGISTRY = "docker.io"
-        DOCKER_USERNAME = "zahidsajif"  // Replace with your Docker Hub username
+        DOCKER_USERNAME = "zahidsajif"
         IMAGE_NAME = "${DOCKER_USERNAME}/aws-node-app"
         IMAGE_TAG = "${IMAGE_NAME}:latest"
-        
-        // Jenkins credentials ID for Docker Hub
-        DOCKER_CREDS_ID = 'docker-hub-credentials'  // Create this in Jenkins
+        DOCKER_CREDS_ID = 'docker-hub-credentials'
     }
 
     stages {
-        // Stage 1: Environment verification
         stage('Verify Environment') {
             steps {
-                echo 'Verifying Node.js and npm installation...'
-                sh 'node --version'
-                sh 'npm --version'
-                sh 'echo "Current directory:" && pwd'
-                sh 'echo "Workspace contents:" && ls -la'
+                echo 'Verifying environment...'
+                sh 'node --version && npm --version'
+                sh 'docker --version'
+                sh 'echo "Current directory:" && pwd && ls -la'
             }
         }
         
-        // Stage 2: Checkout source code
         stage('Checkout Code') {
             steps {
-                checkout scm  // Pulls code from the repository
+                checkout scm
             }
         }
 
-        // Stage 3: Install dependencies
         stage('Install Dependencies') {
             steps {
                 echo 'Installing project dependencies...'
-                sh 'npm install --save'  // Install dependencies
-                
-                // Verify installation
-                sh 'echo "Node modules installed:" && ls -la node_modules/ || echo "No node_modules found"'
+                sh 'npm install --save'
             }
         }
 
-        // Stage 4: Run unit tests
         stage('Run Unit Tests') {
             steps {
                 echo 'Running unit tests...'
                 script {
-                    // Check if test script exists in package.json
                     def hasTestScript = sh(
                         script: 'npm run | grep -q "test" && echo "exists" || echo "not exists"',
                         returnStdout: true
@@ -62,28 +50,16 @@ pipeline {
                         sh 'npm test'
                     } else {
                         echo 'No test script found in package.json, skipping tests'
-                        // Create a simple test file if none exists
-                        sh '''
-                            if [ ! -f test.js ]; then
-                                echo "// Basic test file" > test.js
-                                echo "console.log('Tests would run here');" >> test.js
-                                node test.js
-                            fi
-                        '''
                     }
                 }
             }
         }
 
-        // Stage 5: Build Docker image
         stage('Build Docker Image') {
             steps {
                 echo 'Building Docker image...'
                 script {
-                    // Verify Dockerfile exists
-                    sh 'ls -la | grep Dockerfile || echo "Dockerfile not found, creating one..."'
-                    
-                    // Create Dockerfile if it doesn't exist - FIXED HEREDOC SYNTAX
+                    // Create Dockerfile if it doesn't exist
                     sh '''
                         if [ ! -f Dockerfile ]; then
                             cat > Dockerfile << EOF
@@ -97,7 +73,7 @@ CMD ["node", "app.js"]
 EOF
                             echo "Created Dockerfile"
                         fi
-                        
+                        echo "Dockerfile contents:"
                         cat Dockerfile
                     '''
                 }
@@ -105,12 +81,11 @@ EOF
                 sh """
                     docker build -t ${IMAGE_TAG} .
                     echo "Docker image built successfully:"
-                    docker images | grep ${DOCKER_USERNAME} || true
+                    docker images | grep ${DOCKER_USERNAME} || echo "Image created but not found in list"
                 """
             }
         }
 
-        // Stage 6: Push to Docker Registry
         stage('Push to Registry') {
             steps {
                 echo 'Pushing Docker image to registry...'
@@ -120,15 +95,9 @@ EOF
                     passwordVariable: 'DOCKER_PASS'
                 )]) {
                     sh """
-                        echo "Logging into Docker Hub..."
                         echo "\${DOCKER_PASS}" | docker login -u "\${DOCKER_USER}" --password-stdin
-                        
-                        echo "Pushing image: ${IMAGE_TAG}"
                         docker push ${IMAGE_TAG}
-                        
-                        echo "Logging out from Docker Hub..."
                         docker logout
-                        
                         echo "Image pushed successfully to ${DOCKER_REGISTRY}/${IMAGE_TAG}"
                     """
                 }
@@ -144,11 +113,9 @@ EOF
         }
         success {
             echo '✅ CI/CD Pipeline completed successfully!'
-            // You can add notifications here (email, Slack, etc.)
         }
         failure {
             echo '❌ Pipeline failed! Check the logs for details.'
-            // You can add failure notifications here
         }
     }
 }
