@@ -2,7 +2,7 @@ pipeline {
     agent {
         docker {
             image 'node:16'
-            args '--privileged -v /var/run/docker.sock:/var/run/docker.sock'
+            // Remove socket mounting since we're using DinD
             reuseNode true
         }
     }
@@ -11,8 +11,13 @@ pipeline {
         DOCKER_REGISTRY = "docker.io"
         DOCKER_USERNAME = "zahidsajif"
         IMAGE_NAME = "${DOCKER_USERNAME}/aws-node-app"
-        IMAGE_TAG = "${IMAGE_NAME}:latest"
+        IMAGE_TAG = "${IMAGE_NAME}:${BUILD_NUMBER}"
+        IMAGE_LATEST = "${IMAGE_NAME}:latest"
         DOCKER_CREDS_ID = 'docker-hub-credentials'
+        // Use the DinD connection configured in docker-compose
+        DOCKER_HOST = "tcp://docker:2376"
+        DOCKER_TLS_VERIFY = "1"
+        DOCKER_CERT_PATH = "/certs/client"
     }
 
     stages {
@@ -40,20 +45,22 @@ pipeline {
         stage('Run Unit Tests') {
             steps {
                 echo 'Running unit tests...'
-                sh 'npm test || echo "No tests configured"'
+                sh 'npm test || echo "⚠️ No tests configured - consider adding tests"'
             }
         }
 
         stage('Install Docker CLI') {
             steps {
-                echo 'Installing Docker CLI via binary...'
+                echo 'Installing Docker CLI to communicate with DinD...'
                 sh '''
                     curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-24.0.7.tgz -o docker.tgz
                     tar -xzf docker.tgz
                     cp docker/docker /usr/local/bin/
                     rm -rf docker docker.tgz
                     chmod +x /usr/local/bin/docker
+                    echo "Docker CLI installed:"
                     docker --version
+                    echo "Connecting to DinD at $DOCKER_HOST"
                 '''
             }
         }
@@ -62,8 +69,9 @@ pipeline {
             steps {
                 echo "Building Docker image: ${IMAGE_TAG}"
                 sh '''
-                    docker build -t ${IMAGE_TAG} .
-                    docker images | grep ${IMAGE_NAME} || true
+                    docker build -t ${IMAGE_TAG} -t ${IMAGE_LATEST} .
+                    echo "Verifying image was built:"
+                    docker images | grep ${IMAGE_NAME} || echo "Image not found in listing"
                 '''
             }
         }
@@ -78,6 +86,7 @@ pipeline {
                     sh '''
                         echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
                         docker push ${IMAGE_TAG}
+                        docker push ${IMAGE_LATEST}
                         docker logout
                     '''
                 }
@@ -88,14 +97,19 @@ pipeline {
     post {
         success {
             echo '✅ Pipeline completed successfully!'
-            echo "Docker image pushed: ${IMAGE_TAG}"
+            echo "Docker images pushed:"
+            echo "  - ${IMAGE_TAG}"
+            echo "  - ${IMAGE_LATEST}"
         }
         failure {
             echo '❌ Pipeline failed. Check the logs above.'
         }
         always {
-            echo 'Cleaning up...'
-            sh 'docker image prune -f || true'
+            echo 'Cleaning up unused Docker resources...'
+            sh '''
+                docker image prune -f || true
+                docker system df || true
+            '''
         }
     }
 }
