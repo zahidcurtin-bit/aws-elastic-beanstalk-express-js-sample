@@ -1,22 +1,20 @@
-# Dockerfile for aws-elastic-beanstalk-express-js-sample
-
-# use node.js 16 as the base image
+# Use Node 16 as the base image
 FROM node:16
 
-# set working directory inside the container
+# Set working directory inside container
 WORKDIR /usr/src/app
 
-# copy package file
+# Copy package.json and package-lock.json (if exists)
 COPY package*.json ./
 
-# install dependencies
-RUN npm install
+# Install dependencies and save them
+RUN npm install --save
 
-# copy the remaining code
+# Copy the rest of the app source code
 COPY . .
 
-# expose the port for app as per app.js
-EXPOSE 8080
+# Expose the port your app runs on (example: 3000)
+EXPOSE 3000
 
-# start app
-CMD ["npm","start"]
+# Start the app
+CMD ["node", "index.js"]
