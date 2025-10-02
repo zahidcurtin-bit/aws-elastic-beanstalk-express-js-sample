@@ -1,20 +1,21 @@
-# Use Node 16 as the base image
+# Start from Node 16 image
 FROM node:16
 
-# Set working directory inside container
-WORKDIR /usr/src/app
+# Install Docker CLI
+RUN curl -fsSLO https://get.docker.com/builds/Linux/x86_64/docker-17.04.0-ce.tgz \
+    && tar xzvf docker-17.04.0-ce.tgz \
+    && mv docker/docker /usr/local/bin \
+    && rm -r docker docker-17.04.0-ce.tgz
 
-# Copy package.json and package-lock.json (if exists)
+# Set working directory
+WORKDIR /app
+
+# Copy package.json and install dependencies
 COPY package*.json ./
-
-# Install dependencies and save them
 RUN npm install --save
 
-# Copy the rest of the app source code
+# Copy app files
 COPY . .
 
-# Expose the port your app runs on (example: 3000)
-EXPOSE 3000
-
-# Start the app
+# Default command
 CMD ["node", "index.js"]
