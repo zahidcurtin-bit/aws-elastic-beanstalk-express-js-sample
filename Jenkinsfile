@@ -2,7 +2,8 @@ pipeline {
     agent {
         docker {
             image 'node:16'
-            // Remove socket mounting since we're using DinD
+            // Pass Docker environment variables and mount certificates
+            args '-e DOCKER_HOST=tcp://docker:2376 -e DOCKER_TLS_VERIFY=1 -e DOCKER_CERT_PATH=/certs/client -v jenkins-docker-certs:/certs/client:ro'
             reuseNode true
         }
     }
@@ -14,10 +15,6 @@ pipeline {
         IMAGE_TAG = "${IMAGE_NAME}:${BUILD_NUMBER}"
         IMAGE_LATEST = "${IMAGE_NAME}:latest"
         DOCKER_CREDS_ID = 'docker-hub-credentials'
-        // Use the DinD connection configured in docker-compose
-        DOCKER_HOST = "tcp://docker:2376"
-        DOCKER_TLS_VERIFY = "1"
-        DOCKER_CERT_PATH = "/certs/client"
     }
 
     stages {
