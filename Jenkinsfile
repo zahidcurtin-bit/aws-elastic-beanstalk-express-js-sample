@@ -2,8 +2,7 @@ pipeline {
     agent {
         docker {
             image 'node:16'
-            // Share volumes from Jenkins container instead of explicit mount
-            args '-e DOCKER_HOST=tcp://docker:2376 -e DOCKER_TLS_VERIFY=1 -e DOCKER_CERT_PATH=/certs/client --volumes-from jenkins-blueocean'
+            args '-u root:root'
             reuseNode true
         }
     }
@@ -15,20 +14,23 @@ pipeline {
         IMAGE_TAG = "${IMAGE_NAME}:${BUILD_NUMBER}"
         IMAGE_LATEST = "${IMAGE_NAME}:latest"
         DOCKER_CREDS_ID = 'docker-hub-credentials'
+        DOCKER_HOST = "tcp://docker:2376"
+        DOCKER_TLS_VERIFY = "1"
+        DOCKER_CERT_PATH = "/certs/client"
     }
 
     stages {
+        stage('Checkout Code') {
+            steps {
+                checkout scm
+            }
+        }
+
         stage('Environment Setup') {
             steps {
                 echo 'Verifying Node environment...'
                 sh 'node --version'
                 sh 'npm --version'
-            }
-        }
-
-        stage('Checkout Code') {
-            steps {
-                checkout scm
             }
         }
 
@@ -48,16 +50,28 @@ pipeline {
 
         stage('Install Docker CLI') {
             steps {
-                echo 'Installing Docker CLI to communicate with DinD...'
+                echo 'Installing Docker CLI...'
                 sh '''
                     curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-24.0.7.tgz -o docker.tgz
                     tar -xzf docker.tgz
                     cp docker/docker /usr/local/bin/
                     rm -rf docker docker.tgz
                     chmod +x /usr/local/bin/docker
-                    echo "Docker CLI installed:"
                     docker --version
-                    echo "Connecting to DinD at $DOCKER_HOST"
+                '''
+            }
+        }
+
+        stage('Copy Docker Certificates') {
+            steps {
+                echo 'Copying Docker TLS certificates from Jenkins container...'
+                sh '''
+                    mkdir -p /certs/client
+                    # Copy certificates from Jenkins workspace to Node container
+                    if [ -d "/var/jenkins_home/certs/client" ]; then
+                        cp -r /var/jenkins_home/certs/client/* /certs/client/
+                    fi
+                    ls -la /certs/client/ || echo "Certificates not found"
                 '''
             }
         }
@@ -68,7 +82,7 @@ pipeline {
                 sh '''
                     docker build -t ${IMAGE_TAG} -t ${IMAGE_LATEST} .
                     echo "Verifying image was built:"
-                    docker images | grep ${IMAGE_NAME} || echo "Image not found in listing"
+                    docker images | grep ${IMAGE_NAME}
                 '''
             }
         }
@@ -102,11 +116,8 @@ pipeline {
             echo '❌ Pipeline failed. Check the logs above.'
         }
         always {
-            echo 'Cleaning up unused Docker resources...'
-            sh '''
-                docker image prune -f || true
-                docker system df || true
-            '''
+            echo 'Cleaning up...'
+            sh 'docker image prune -f || true'
         }
     }
 }
