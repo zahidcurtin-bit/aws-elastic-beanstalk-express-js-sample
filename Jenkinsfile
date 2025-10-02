@@ -1,36 +1,35 @@
 pipeline {
-    agent {
-        docker {
-            image 'node:16'
-            args '-v /var/run/docker.sock:/var/run/docker.sock'
-        }
-    }
+    agent any
     
     stages {
-        stage('Checkout') {
+        stage('Pull Node 16 Image') {
             steps {
-                checkout scm
+                sh 'docker pull node:16'
             }
         }
         
-        stage('Install Dependencies') {
+        stage('Build in Node Container') {
             steps {
-                sh 'npm install --save'
+                sh '''
+                    docker run --rm \
+                    -v ${WORKSPACE}:/app \
+                    -w /app \
+                    node:16 \
+                    npm install --save
+                '''
             }
         }
         
-        stage('Verify Installation') {
+        stage('Verify') {
             steps {
-                sh 'node --version'
-                sh 'npm --version'
-                sh 'npm list --depth=0'
+                sh '''
+                    docker run --rm \
+                    -v ${WORKSPACE}:/app \
+                    -w /app \
+                    node:16 \
+                    npm list --depth=0
+                '''
             }
-        }
-    }
-    
-    post {
-        always {
-            cleanWs()
         }
     }
 }
