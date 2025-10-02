@@ -28,8 +28,8 @@ pipeline {
             steps {
                 sh '''
                     # Install Docker CLI in Alpine Linux
-                    apk update
-                    apk add --no-cache docker-cli
+                    apk-get update
+                    apk-get add --no-cache docker-cli
                     docker --version
                 '''
             }
