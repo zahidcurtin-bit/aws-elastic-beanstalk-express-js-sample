@@ -2,8 +2,8 @@ pipeline {
     agent {
         docker {
             image 'node:16'
-            // Let Jenkins handle networking, just mount certs and set Docker connection
-            args '-e DOCKER_HOST=tcp://docker:2376 -e DOCKER_TLS_VERIFY=1 -e DOCKER_CERT_PATH=/certs/client -v project2-compose_jenkins-docker-certs:/certs/client:ro'
+            // Share volumes from Jenkins container instead of explicit mount
+            args '-e DOCKER_HOST=tcp://docker:2376 -e DOCKER_TLS_VERIFY=1 -e DOCKER_CERT_PATH=/certs/client --volumes-from jenkins-blueocean'
             reuseNode true
         }
     }
