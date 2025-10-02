@@ -23,5 +23,17 @@ pipeline {
                 sh 'npm install --save'
             }
         }
+
+        stage('Test Docker Bind') {
+            steps {
+                sh 'docker run --rm -v $PWD:/app node:16 ls /app'
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                sh 'docker build -t my-node-app .'
+            }
+        }
     }
 }
