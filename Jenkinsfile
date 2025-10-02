@@ -14,9 +14,7 @@ pipeline {
         IMAGE_TAG = "${IMAGE_NAME}:${BUILD_NUMBER}"
         IMAGE_LATEST = "${IMAGE_NAME}:latest"
         DOCKER_CREDS_ID = 'docker-hub-credentials'
-        DOCKER_HOST = "tcp://docker:2376"
-        DOCKER_TLS_VERIFY = "1"
-        DOCKER_CERT_PATH = "/certs/client"
+        DOCKER_HOST = "tcp://docker:2375"  // Changed to non-TLS port
     }
 
     stages {
@@ -64,14 +62,10 @@ pipeline {
 
         stage('Copy Docker Certificates') {
             steps {
-                echo 'Copying Docker TLS certificates from Jenkins container...'
+                echo 'Setting DOCKER_HOST environment variable...'
                 sh '''
-                    mkdir -p /certs/client
-                    # Copy certificates from Jenkins workspace to Node container
-                    if [ -d "/var/jenkins_home/certs/client" ]; then
-                        cp -r /var/jenkins_home/certs/client/* /certs/client/
-                    fi
-                    ls -la /certs/client/ || echo "Certificates not found"
+                    echo "DOCKER_HOST is set to: $DOCKER_HOST"
+                    echo "No TLS certificates needed - using non-TLS connection"
                 '''
             }
         }
