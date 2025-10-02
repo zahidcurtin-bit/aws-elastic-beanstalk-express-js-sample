@@ -2,8 +2,8 @@ pipeline {
     agent {
         docker {
             image 'node:16'
-            // Pass Docker environment variables and mount certificates
-            args '-e DOCKER_HOST=tcp://docker:2376 -e DOCKER_TLS_VERIFY=1 -e DOCKER_CERT_PATH=/certs/client -v jenkins-docker-certs:/certs/client:ro'
+            // Mount volume at /certs/client and set cert path correctly
+            args '--network project2-compose_jenkins -e DOCKER_HOST=tcp://docker:2376 -e DOCKER_TLS_VERIFY=1 -e DOCKER_CERT_PATH=/certs/client -v project2-compose_jenkins-docker-certs:/certs/client:ro'
             reuseNode true
         }
     }
