@@ -83,18 +83,18 @@ pipeline {
                     // Verify Dockerfile exists
                     sh 'ls -la | grep Dockerfile || echo "Dockerfile not found, creating one..."'
                     
-                    // Create Dockerfile if it doesn't exist
+                    // Create Dockerfile if it doesn't exist - FIXED HEREDOC SYNTAX
                     sh '''
                         if [ ! -f Dockerfile ]; then
                             cat > Dockerfile << EOF
-                        FROM node:16-alpine
-                        WORKDIR /app
-                        COPY package*.json ./
-                        RUN npm install --production
-                        COPY . .
-                        EXPOSE 8080
-                        CMD ["node", "app.js"]
-                        EOF
+FROM node:16-alpine
+WORKDIR /app
+COPY package*.json ./
+RUN npm install --production
+COPY . .
+EXPOSE 8080
+CMD ["node", "app.js"]
+EOF
                             echo "Created Dockerfile"
                         fi
                         
@@ -105,7 +105,7 @@ pipeline {
                 sh """
                     docker build -t ${IMAGE_TAG} .
                     echo "Docker image built successfully:"
-                    docker images | grep ${DOCKER_USERNAME}
+                    docker images | grep ${DOCKER_USERNAME} || true
                 """
             }
         }
