@@ -2,32 +2,26 @@ pipeline {
     agent any
     
     stages {
-        stage('Pull Node 16 Image') {
-            steps {
-                sh 'docker pull node:16'
-            }
-        }
-        
-        stage('Build in Node Container') {
+        stage('Diagnose') {
             steps {
                 sh '''
-                    docker run --rm \
-                    -v ${WORKSPACE}:/app \
-                    -w /app \
-                    node:16 \
-                    npm install --save
-                '''
-            }
-        }
-        
-        stage('Verify') {
-            steps {
-                sh '''
-                    docker run --rm \
-                    -v ${WORKSPACE}:/app \
-                    -w /app \
-                    node:16 \
-                    npm list --depth=0
+                    echo "=== PATH ==="
+                    echo $PATH
+                    
+                    echo "=== Which Docker ==="
+                    which docker || echo "docker not found in PATH"
+                    
+                    echo "=== Find Docker ==="
+                    find /usr -name docker 2>/dev/null || echo "docker binary not found"
+                    
+                    echo "=== Docker Version ==="
+                    /usr/bin/docker --version || echo "docker not executable at /usr/bin/docker"
+                    
+                    echo "=== User ==="
+                    whoami
+                    
+                    echo "=== Groups ==="
+                    groups
                 '''
             }
         }
