@@ -13,7 +13,6 @@ pipeline {
         IMAGE_TAG = "${IMAGE_NAME}:${BUILD_NUMBER}"
         IMAGE_LATEST = "${IMAGE_NAME}:latest"
         DOCKER_CREDS_ID = 'docker-hub-credentials'
-        // Docker daemon connection settings
         DOCKER_HOST = "tcp://docker:2376"
         DOCKER_TLS_VERIFY = "1"
         DOCKER_CERT_PATH = "/certs/client"
@@ -38,7 +37,6 @@ pipeline {
             steps {
                 echo 'Running unit tests...'
                 sh '''
-                    # Run tests if test script exists
                     if npm run 2>&1 | grep -q "test"; then
                         npm test
                     else
@@ -56,9 +54,19 @@ pipeline {
                 echo 'Installing Docker CLI in Node container...'
                 sh '''
                     if ! command -v docker >/dev/null 2>&1; then
+                        echo "Fixing Debian Buster repositories..."
+                        # Update sources.list to use archive for Debian Buster
+                        cat > /etc/apt/sources.list << 'EOF'
+deb http://archive.debian.org/debian/ buster main
+deb http://archive.debian.org/debian-security buster/updates main
+EOF
+                        
+                        # Disable release file check for archived repositories
+                        echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99no-check-valid-until
+                        
                         echo "Installing Docker CLI..."
                         apt-get update
-                        apt-get install -y curl
+                        apt-get install -y curl ca-certificates
                         curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-24.0.7.tgz -o docker.tgz
                         tar -xzf docker.tgz
                         cp docker/docker /usr/local/bin/
