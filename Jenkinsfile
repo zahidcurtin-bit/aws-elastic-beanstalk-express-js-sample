@@ -2,9 +2,8 @@ pipeline {
     agent {
         docker {
             image 'node:16'
-            // Connect to the same Docker network as Jenkins
-            // The network name will be auto-detected from the running Jenkins container
-            args "-u root:root -v /var/run/docker.sock:/var/run/docker.sock -v jenkins-docker-certs:/certs/client:ro -e DOCKER_HOST=tcp://docker:2376 -e DOCKER_TLS_VERIFY=1 -e DOCKER_CERT_PATH=/certs/client"
+            // Mount the correct Docker certs volume with full compose project name
+            args '-u root:root -v project2-compose_jenkins-docker-certs:/certs/client:ro -e DOCKER_HOST=tcp://docker:2376 -e DOCKER_TLS_VERIFY=1 -e DOCKER_CERT_PATH=/certs/client'
             reuseNode true
         }
     }
@@ -63,14 +62,12 @@ pipeline {
 
         stage('Verify Docker Connection') {
             steps {
-                echo 'Verifying Docker TLS connection...'
+                echo 'Verifying Docker connection...'
                 sh '''
-                    echo "DOCKER_HOST: $DOCKER_HOST"
-                    echo "DOCKER_CERT_PATH: $DOCKER_CERT_PATH"
-                    echo "Checking certificates:"
-                    ls -la /certs/client/ || echo "Certificate directory not found"
                     echo "Testing Docker connection:"
                     docker info
+                    echo "Docker version:"
+                    docker version
                 '''
             }
         }
