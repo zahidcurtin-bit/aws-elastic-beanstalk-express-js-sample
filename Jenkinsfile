@@ -2,8 +2,8 @@ pipeline {
     agent {
         docker {
             image 'node:16'
-            // Mount the correct Docker certs volume with full compose project name
-            args '-u root:root -v project2-compose_jenkins-docker-certs:/certs:ro -e DOCKER_HOST=tcp://docker:2376 -e DOCKER_TLS_VERIFY=1 -e DOCKER_CERT_PATH=/certs/client'
+            // Use the correct volume mount path - remove the project prefix
+            args '-u root:root -v jenkins-docker-certs:/certs:ro -e DOCKER_HOST=tcp://docker-dind:2376 -e DOCKER_TLS_VERIFY=1 -e DOCKER_CERT_PATH=/certs/client'
             reuseNode true
         }
     }
@@ -34,15 +34,35 @@ pipeline {
 
         stage('Install Dependencies') {
             steps {
-                echo 'Installing dependencies with npm install --save...'
-                sh 'npm install --save'
+                echo 'Installing dependencies with npm install...'
+                sh 'npm install'
             }
         }
 
         stage('Run Unit Tests') {
             steps {
                 echo 'Running unit tests...'
-                sh 'npm test || echo "⚠️ No tests configured - consider adding tests"'
+                sh '''
+                    # Check if test script exists, if not create a basic one
+                    if ! npm run | grep -q "test"; then
+                        echo "Adding basic test script to package.json"
+                        npm pkg set scripts.test="echo 'No tests specified' && exit 0"
+                    fi
+                    npm test
+                '''
+            }
+        }
+
+        stage('Verify Docker Setup') {
+            steps {
+                echo 'Checking Docker environment...'
+                sh '''
+                    echo "DOCKER_HOST: $DOCKER_HOST"
+                    echo "DOCKER_CERT_PATH: $DOCKER_CERT_PATH"
+                    echo "Checking certs directory:"
+                    ls -la /certs/ || echo "Certs directory not accessible"
+                    ls -la /certs/client/ || echo "Client certs not found"
+                '''
             }
         }
 
@@ -50,11 +70,14 @@ pipeline {
             steps {
                 echo 'Installing Docker CLI...'
                 sh '''
-                    curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-24.0.7.tgz -o docker.tgz
-                    tar -xzf docker.tgz
-                    cp docker/docker /usr/local/bin/
-                    rm -rf docker docker.tgz
-                    chmod +x /usr/local/bin/docker
+                    # Check if docker is already installed
+                    if ! command -v docker &> /dev/null; then
+                        curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-24.0.7.tgz -o docker.tgz
+                        tar -xzf docker.tgz
+                        cp docker/docker /usr/local/bin/
+                        rm -rf docker docker.tgz
+                        chmod +x /usr/local/bin/docker
+                    fi
                     docker --version
                 '''
             }
@@ -64,26 +87,36 @@ pipeline {
             steps {
                 echo 'Verifying Docker connection...'
                 sh '''
-                    echo "Testing Docker connection:"
-                    docker info
-                    echo "Docker version:"
+                    echo "Testing Docker connection to: $DOCKER_HOST"
                     docker version
+                    echo "Docker info:"
+                    docker info
                 '''
             }
         }
 
         stage('Build Docker Image') {
+            when {
+                expression { currentBuild.result == null || currentBuild.result == 'SUCCESS' }
+            }
             steps {
                 echo "Building Docker image: ${IMAGE_TAG}"
                 sh '''
+                    echo "Current directory:"
+                    pwd
+                    ls -la
+                    echo "Building Docker image..."
                     docker build -t ${IMAGE_TAG} -t ${IMAGE_LATEST} .
                     echo "Verifying image was built:"
-                    docker images | grep ${IMAGE_NAME}
+                    docker images | grep ${IMAGE_NAME} || echo "No images found"
                 '''
             }
         }
 
         stage('Push to Docker Registry') {
+            when {
+                expression { currentBuild.result == null || currentBuild.result == 'SUCCESS' }
+            }
             steps {
                 echo 'Pushing image to Docker Hub...'
                 withCredentials([usernamePassword(
@@ -91,10 +124,13 @@ pipeline {
                     usernameVariable: 'DOCKER_USER', 
                     passwordVariable: 'DOCKER_PASS')]) {
                     sh '''
+                        echo "Logging into Docker Hub..."
                         echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
+                        echo "Pushing images..."
                         docker push ${IMAGE_TAG}
                         docker push ${IMAGE_LATEST}
                         docker logout
+                        echo "Images pushed successfully!"
                     '''
                 }
             }
@@ -102,6 +138,14 @@ pipeline {
     }
 
     post {
+        always {
+            echo 'Cleaning up...'
+            sh '''
+                docker image prune -f || true
+                echo "Final Docker images:"
+                docker images || true
+            '''
+        }
         success {
             echo '✅ Pipeline completed successfully!'
             echo "Docker images pushed:"
@@ -110,10 +154,6 @@ pipeline {
         }
         failure {
             echo '❌ Pipeline failed. Check the logs above.'
-        }
-        always {
-            echo 'Cleaning up...'
-            sh 'docker image prune -f || true'
         }
     }
 }
