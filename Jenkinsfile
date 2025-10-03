@@ -16,6 +16,7 @@ pipeline {
         DOCKER_CREDS_ID = 'docker-hub-credentials'
         DOCKER_HOST = "tcp://docker:2376"
         DOCKER_TLS_VERIFY = "1"
+        DOCKER_CERT_PATH = "/certs/client"
     }
 
     stages {
@@ -69,17 +70,42 @@ EOF
                         chmod +x /usr/local/bin/docker
                     fi
                     
-                    # Copy certificates from Jenkins home (which is mounted)
-                    mkdir -p /root/.docker
-                    cp -r /var/jenkins_home/.docker/certs /root/.docker/ || {
-                        echo "Copying certs from alternate location..."
-                        mkdir -p /certs/client
-                        # Try to find certs in Jenkins workspace
-                        find /var/jenkins_home -name "ca.pem" -path "*/certs/client/*" -exec dirname {} \\; | head -1 | xargs -I {} cp -r {} /certs/client/
-                    }
+                    # Setup certificate directory
+                    mkdir -p /certs/client
                     
-                    # Set cert path
-                    export DOCKER_CERT_PATH=/certs/client
+                    # Search for Docker certificates in multiple locations
+                    echo "Searching for Docker certificates..."
+                    
+                    # Try common Jenkins cert locations
+                    if [ -d "/var/jenkins_home/certs/client" ]; then
+                        echo "Found certs in /var/jenkins_home/certs/client"
+                        cp -r /var/jenkins_home/certs/client/* /certs/client/ 2>/dev/null || true
+                    fi
+                    
+                    if [ -d "/var/jenkins_home/.docker/certs/client" ]; then
+                        echo "Found certs in /var/jenkins_home/.docker/certs/client"
+                        cp -r /var/jenkins_home/.docker/certs/client/* /certs/client/ 2>/dev/null || true
+                    fi
+                    
+                    # Search for ca.pem in workspace or Jenkins home
+                    CERT_DIR=$(find /var/jenkins_home -type f -name "ca.pem" 2>/dev/null | grep -E "certs?/client" | head -1 | xargs -r dirname)
+                    if [ -n "$CERT_DIR" ] && [ -d "$CERT_DIR" ]; then
+                        echo "Found certs via find: $CERT_DIR"
+                        cp "$CERT_DIR"/* /certs/client/ 2>/dev/null || true
+                    fi
+                    
+                    # List what we found
+                    echo "Certificates in /certs/client:"
+                    ls -la /certs/client/ || echo "No certificates found!"
+                    
+                    # Verify we have the required files
+                    if [ ! -f "/certs/client/ca.pem" ]; then
+                        echo "WARNING: ca.pem not found!"
+                        echo "Checking if Docker daemon is accessible without TLS..."
+                        # Try without TLS as fallback
+                        export DOCKER_TLS_VERIFY=0
+                        export DOCKER_HOST="tcp://docker:2375"
+                    fi
                     
                     echo "Docker setup complete"
                     docker --version
@@ -91,9 +117,34 @@ EOF
             steps {
                 echo 'Testing Docker connection...'
                 sh '''
-                    export DOCKER_CERT_PATH=/certs/client
-                    timeout 30 sh -c 'until docker info >/dev/null 2>&1; do echo "Waiting..."; sleep 2; done'
-                    echo "✅ Docker connected!"
+                    # First verify certificates exist
+                    if [ -f "/certs/client/ca.pem" ]; then
+                        echo "✓ Using TLS with certificates"
+                        export DOCKER_CERT_PATH=/certs/client
+                        export DOCKER_TLS_VERIFY=1
+                        export DOCKER_HOST="tcp://docker:2376"
+                    else
+                        echo "⚠ Certificates not found, trying non-TLS connection"
+                        export DOCKER_TLS_VERIFY=0
+                        export DOCKER_HOST="tcp://docker:2375"
+                    fi
+                    
+                    # Test connection with timeout
+                    echo "Testing Docker connection to $DOCKER_HOST..."
+                    timeout 30 sh -c 'until docker info >/dev/null 2>&1; do echo "Waiting for Docker..."; sleep 2; done' || {
+                        echo "❌ Docker connection failed!"
+                        echo "Debugging information:"
+                        echo "DOCKER_HOST=$DOCKER_HOST"
+                        echo "DOCKER_TLS_VERIFY=$DOCKER_TLS_VERIFY"
+                        echo "DOCKER_CERT_PATH=$DOCKER_CERT_PATH"
+                        echo ""
+                        echo "Available network services:"
+                        nc -zv docker 2375 2>&1 || echo "Port 2375 (non-TLS) not accessible"
+                        nc -zv docker 2376 2>&1 || echo "Port 2376 (TLS) not accessible"
+                        exit 1
+                    }
+                    
+                    echo "✅ Docker connected successfully!"
                     docker version
                 '''
             }
@@ -103,7 +154,16 @@ EOF
             steps {
                 echo "Building: ${IMAGE_TAG}"
                 sh '''
-                    export DOCKER_CERT_PATH=/certs/client
+                    # Use same Docker config as verification stage
+                    if [ -f "/certs/client/ca.pem" ]; then
+                        export DOCKER_CERT_PATH=/certs/client
+                        export DOCKER_TLS_VERIFY=1
+                        export DOCKER_HOST="tcp://docker:2376"
+                    else
+                        export DOCKER_TLS_VERIFY=0
+                        export DOCKER_HOST="tcp://docker:2375"
+                    fi
+                    
                     docker build -t ${IMAGE_TAG} -t ${IMAGE_LATEST} .
                     docker images | grep ${IMAGE_NAME}
                 '''
@@ -117,7 +177,16 @@ EOF
                     usernameVariable: 'DOCKER_USER',
                     passwordVariable: 'DOCKER_PASS')]) {
                     sh '''
-                        export DOCKER_CERT_PATH=/certs/client
+                        # Use same Docker config as verification stage
+                        if [ -f "/certs/client/ca.pem" ]; then
+                            export DOCKER_CERT_PATH=/certs/client
+                            export DOCKER_TLS_VERIFY=1
+                            export DOCKER_HOST="tcp://docker:2376"
+                        else
+                            export DOCKER_TLS_VERIFY=0
+                            export DOCKER_HOST="tcp://docker:2375"
+                        fi
+                        
                         echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
                         docker push ${IMAGE_TAG}
                         docker push ${IMAGE_LATEST}
@@ -131,7 +200,17 @@ EOF
 
     post {
         always {
-            sh 'docker image prune -f || true'
+            sh '''
+                if [ -f "/certs/client/ca.pem" ]; then
+                    export DOCKER_CERT_PATH=/certs/client
+                    export DOCKER_TLS_VERIFY=1
+                    export DOCKER_HOST="tcp://docker:2376"
+                else
+                    export DOCKER_TLS_VERIFY=0
+                    export DOCKER_HOST="tcp://docker:2375"
+                fi
+                docker image prune -f || true
+            '''
         }
         success {
             echo '✅ Pipeline completed!'
