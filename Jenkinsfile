@@ -2,7 +2,7 @@ pipeline {
     agent {
         docker {
             image 'node:16'
-            args '--user root --network jenkins_jenkins -v jenkins-docker-certs:/certs/client:ro'
+            args '--user root --network project2-compose_jenkins -v jenkins-docker-certs:/certs/client:ro'
         }
     }
 
