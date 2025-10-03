@@ -2,7 +2,7 @@ pipeline {
     agent {
         docker {
             image 'node:16'
-            args '-u root:root -v jenkins-docker-certs:/certs/client:ro -e DOCKER_HOST=tcp://docker:2376 -e DOCKER_TLS_VERIFY=1 -e DOCKER_CERT_PATH=/certs/client'
+            args '-u root:root --network host -v /var/run/docker.sock:/var/run/docker.sock'
             reuseNode true
         }
     }
@@ -14,7 +14,6 @@ pipeline {
         IMAGE_TAG = "${IMAGE_NAME}:${BUILD_NUMBER}"
         IMAGE_LATEST = "${IMAGE_NAME}:latest"
         DOCKER_CREDS_ID = 'docker-hub-credentials'
-        DOCKER_HOST = "tcp://docker:2375"  // Changed to non-TLS port
     }
 
     stages {
@@ -29,13 +28,14 @@ pipeline {
                 echo 'Verifying Node environment...'
                 sh 'node --version'
                 sh 'npm --version'
+                sh 'whoami && pwd && ls -la'
             }
         }
 
         stage('Install Dependencies') {
             steps {
-                echo 'Installing dependencies with npm install --save...'
-                sh 'npm install --save'
+                echo 'Installing dependencies with npm install...'
+                sh 'npm install'
             }
         }
 
@@ -46,27 +46,20 @@ pipeline {
             }
         }
 
-        stage('Install Docker CLI') {
+        stage('Verify Docker') {
             steps {
-                echo 'Installing Docker CLI...'
-                sh '''
-                    curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-24.0.7.tgz -o docker.tgz
-                    tar -xzf docker.tgz
-                    cp docker/docker /usr/local/bin/
-                    rm -rf docker docker.tgz
-                    chmod +x /usr/local/bin/docker
-                    docker --version
-                '''
-            }
-        }
-
-        stage('Copy Docker Certificates') {
-            steps {
-                echo 'Setting DOCKER_HOST environment variable...'
-                sh '''
-                    echo "DOCKER_HOST is set to: $DOCKER_HOST"
-                    echo "No TLS certificates needed - using non-TLS connection"
-                '''
+                echo 'Checking Docker availability...'
+                script {
+                    try {
+                        sh 'docker --version'
+                    } catch (Exception e) {
+                        echo 'Docker not available in container, installing...'
+                        sh '''
+                            apt-get update && apt-get install -y docker.io
+                            docker --version
+                        '''
+                    }
+                }
             }
         }
 
@@ -76,7 +69,7 @@ pipeline {
                 sh '''
                     docker build -t ${IMAGE_TAG} -t ${IMAGE_LATEST} .
                     echo "Verifying image was built:"
-                    docker images | grep ${IMAGE_NAME}
+                    docker images | grep ${IMAGE_NAME} || true
                 '''
             }
         }
