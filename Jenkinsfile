@@ -2,7 +2,14 @@ pipeline {
     agent {
         docker {
             image 'node:16'
-            args '-u root:root'
+            args '''
+                -u root:root 
+                -v jenkins-docker-certs-client:/certs/client:ro 
+                -e DOCKER_HOST=tcp://docker:2376 
+                -e DOCKER_TLS_VERIFY=1 
+                -e DOCKER_CERT_PATH=/certs/client
+            '''
+            reuseNode true
         }
     }
 
@@ -13,9 +20,6 @@ pipeline {
         IMAGE_TAG = "${IMAGE_NAME}:${BUILD_NUMBER}"
         IMAGE_LATEST = "${IMAGE_NAME}:latest"
         DOCKER_CREDS_ID = 'docker-hub-credentials'
-        DOCKER_HOST = "tcp://docker:2376"
-        DOCKER_TLS_VERIFY = "1"
-        DOCKER_CERT_PATH = "/certs/client"
     }
 
     stages {
@@ -37,6 +41,7 @@ pipeline {
             steps {
                 echo 'Running unit tests...'
                 sh '''
+                    # Run tests if test script exists
                     if npm run 2>&1 | grep -q "test"; then
                         npm test
                     else
@@ -55,13 +60,11 @@ pipeline {
                 sh '''
                     if ! command -v docker >/dev/null 2>&1; then
                         echo "Fixing Debian Buster repositories..."
-                        # Update sources.list to use archive for Debian Buster
-                        cat > /etc/apt/sources.list << 'EOF'
-deb http://archive.debian.org/debian/ buster main
+                        # Fix for Debian Buster archived repos
+                        cat > /etc/apt/sources.list <<EOF
+deb http://archive.debian.org/debian buster main
 deb http://archive.debian.org/debian-security buster/updates main
 EOF
-                        
-                        # Disable release file check for archived repositories
                         echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99no-check-valid-until
                         
                         echo "Installing Docker CLI..."
@@ -73,22 +76,35 @@ EOF
                         rm -rf docker docker.tgz
                         chmod +x /usr/local/bin/docker
                     fi
+                    echo "Docker CLI installed:"
                     docker --version
                 '''
             }
         }
 
-        stage('Wait for Docker Daemon') {
+        stage('Verify Docker Connection') {
             steps {
-                echo 'Waiting for Docker daemon to be ready...'
+                echo 'Verifying Docker daemon connection...'
                 sh '''
-                    echo "Checking Docker daemon connection..."
-                    until docker info >/dev/null 2>&1; do 
-                        echo "Docker daemon not ready yet, waiting..."
-                        sleep 1
-                    done
-                    echo "✅ Docker daemon is ready!"
-                    docker info
+                    echo "=== Docker Environment ==="
+                    echo "DOCKER_HOST: $DOCKER_HOST"
+                    echo "DOCKER_CERT_PATH: $DOCKER_CERT_PATH"
+                    echo "DOCKER_TLS_VERIFY: $DOCKER_TLS_VERIFY"
+                    
+                    echo "=== Certificate Files ==="
+                    ls -la /certs/client/
+                    
+                    echo "=== Testing Docker Connection ==="
+                    # Wait up to 30 seconds for docker daemon
+                    timeout 30 sh -c 'until docker info >/dev/null 2>&1; do sleep 2; done' || {
+                        echo "ERROR: Cannot connect to Docker daemon after 30 seconds"
+                        echo "Attempting docker info for details:"
+                        docker info || true
+                        exit 1
+                    }
+                    
+                    echo "✅ Docker connection successful!"
+                    docker version
                 '''
             }
         }
@@ -97,6 +113,9 @@ EOF
             steps {
                 echo "Building Docker image: ${IMAGE_TAG}"
                 sh '''
+                    echo "Current directory contents:"
+                    ls -la
+                    
                     echo "Building Docker image..."
                     docker build -t ${IMAGE_TAG} -t ${IMAGE_LATEST} .
                     
@@ -124,7 +143,7 @@ EOF
                         docker push ${IMAGE_LATEST}
                         
                         docker logout
-                        echo "Images pushed successfully!"
+                        echo "✅ Images pushed successfully!"
                     '''
                 }
             }
@@ -134,9 +153,7 @@ EOF
     post {
         always {
             echo 'Cleaning up...'
-            sh '''
-                docker image prune -f || true
-            '''
+            sh 'docker image prune -f || true'
         }
         success {
             echo '✅ CI/CD Pipeline completed successfully!'
