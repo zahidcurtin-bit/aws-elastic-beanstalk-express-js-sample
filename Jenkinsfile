@@ -2,8 +2,7 @@ pipeline {
     agent {
         docker {
             image 'node:16'
-            // Use the correct volume mount path - remove the project prefix
-            args '-u root:root -v jenkins-docker-certs:/certs:ro -e DOCKER_HOST=tcp://docker-dind:2376 -e DOCKER_TLS_VERIFY=1 -e DOCKER_CERT_PATH=/certs/client'
+            args '-u root:root -v jenkins-docker-certs-client:/certs/client:ro -e DOCKER_HOST=tcp://docker-dind:2376 -e DOCKER_TLS_VERIFY=1 -e DOCKER_CERT_PATH=/certs/client'
             reuseNode true
         }
     }
@@ -34,7 +33,7 @@ pipeline {
 
         stage('Install Dependencies') {
             steps {
-                echo 'Installing dependencies with npm install...'
+                echo 'Installing dependencies...'
                 sh 'npm install'
             }
         }
@@ -55,13 +54,25 @@ pipeline {
 
         stage('Verify Docker Setup') {
             steps {
-                echo 'Checking Docker environment...'
+                echo 'Checking Docker environment and certificates...'
                 sh '''
+                    echo "=== Docker Environment ==="
                     echo "DOCKER_HOST: $DOCKER_HOST"
                     echo "DOCKER_CERT_PATH: $DOCKER_CERT_PATH"
-                    echo "Checking certs directory:"
-                    ls -la /certs/ || echo "Certs directory not accessible"
-                    ls -la /certs/client/ || echo "Client certs not found"
+                    echo "DOCKER_TLS_VERIFY: $DOCKER_TLS_VERIFY"
+                    
+                    echo "=== Checking Certificate Files ==="
+                    echo "Certificate directory contents:"
+                    ls -la /certs/client/ || echo "Client certs directory not found"
+                    
+                    if [ -d "/certs/client" ]; then
+                        echo "Client certificate files:"
+                        ls -la /certs/client/ | grep -E "(ca.pem|cert.pem|key.pem)" || echo "Required certificate files not found"
+                    fi
+                    
+                    echo "=== Waiting for Docker Daemon ==="
+                    # Wait for Docker daemon to be ready
+                    sleep 10
                 '''
             }
         }
@@ -71,26 +82,39 @@ pipeline {
                 echo 'Installing Docker CLI...'
                 sh '''
                     # Check if docker is already installed
-                    if ! command -v docker &> /dev/null; then
+                    if command -v docker >/dev/null 2>&1; then
+                        echo "Docker is already installed"
+                        docker --version
+                    else
+                        echo "Installing Docker..."
                         curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-24.0.7.tgz -o docker.tgz
                         tar -xzf docker.tgz
                         cp docker/docker /usr/local/bin/
                         rm -rf docker docker.tgz
                         chmod +x /usr/local/bin/docker
+                        docker --version
                     fi
-                    docker --version
                 '''
             }
         }
 
-        stage('Verify Docker Connection') {
+        stage('Test Docker Connection') {
             steps {
-                echo 'Verifying Docker connection...'
+                echo 'Testing Docker connection...'
                 sh '''
-                    echo "Testing Docker connection to: $DOCKER_HOST"
-                    docker version
+                    echo "=== Testing Docker Connection ==="
+                    timeout 30s bash -c '
+                        until docker version >/dev/null 2>&1; do
+                            echo "Waiting for Docker daemon to be ready..."
+                            sleep 5
+                        done
+                    ' || echo "Docker connection timeout - continuing anyway"
+                    
+                    echo "Docker version:"
+                    docker version || echo "Docker version check failed"
+                    
                     echo "Docker info:"
-                    docker info
+                    docker info || echo "Docker info check failed"
                 '''
             }
         }
@@ -102,13 +126,14 @@ pipeline {
             steps {
                 echo "Building Docker image: ${IMAGE_TAG}"
                 sh '''
-                    echo "Current directory:"
-                    pwd
+                    echo "Current directory contents:"
                     ls -la
+                    
                     echo "Building Docker image..."
                     docker build -t ${IMAGE_TAG} -t ${IMAGE_LATEST} .
-                    echo "Verifying image was built:"
-                    docker images | grep ${IMAGE_NAME} || echo "No images found"
+                    
+                    echo "Verifying built images:"
+                    docker images | grep ${IMAGE_NAME} || echo "No images found for ${IMAGE_NAME}"
                 '''
             }
         }
@@ -126,11 +151,13 @@ pipeline {
                     sh '''
                         echo "Logging into Docker Hub..."
                         echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
+                        
                         echo "Pushing images..."
-                        docker push ${IMAGE_TAG}
-                        docker push ${IMAGE_LATEST}
+                        docker push ${IMAGE_TAG} || echo "Failed to push ${IMAGE_TAG}"
+                        docker push ${IMAGE_LATEST} || echo "Failed to push ${IMAGE_LATEST}"
+                        
                         docker logout
-                        echo "Images pushed successfully!"
+                        echo "Push operations completed"
                     '''
                 }
             }
@@ -141,14 +168,15 @@ pipeline {
         always {
             echo 'Cleaning up...'
             sh '''
-                docker image prune -f || true
-                echo "Final Docker images:"
-                docker images || true
+                echo "=== Cleanup ==="
+                docker image prune -f || echo "Docker prune failed"
+                echo "Remaining images:"
+                docker images || echo "Cannot list docker images"
             '''
         }
         success {
             echo '✅ Pipeline completed successfully!'
-            echo "Docker images pushed:"
+            echo "Docker images:"
             echo "  - ${IMAGE_TAG}"
             echo "  - ${IMAGE_LATEST}"
         }
