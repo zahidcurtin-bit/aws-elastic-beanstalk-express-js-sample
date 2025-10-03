@@ -1,35 +1,10 @@
-# Dockerfile for aws-elastic-beanstalk-express-js-sample
-
-# use node.js 16 as the base image
-FROM node:16
-
-# set working directory inside the container
-WORKDIR /usr/src/app
-
-# copy package file
-COPY package*.json ./
-
-# install dependencies
-RUN npm install
-
-# copy the remaining code
-COPY . .
-
-# expose the port for app as per app.js
-EXPOSE 8080
-
-# start app
-CMD ["npm","start"]
-
-
-jenkinsfile
-
-
 pipeline {
     agent {
         docker {
             image 'node:16'
-            args '--privileged -v /var/run/docker.sock:/var/run/docker.sock'
+            // Connect to the same Docker network as Jenkins
+            // The network name will be auto-detected from the running Jenkins container
+            args "-u root:root -v /var/run/docker.sock:/var/run/docker.sock -v jenkins-docker-certs:/certs/client:ro -e DOCKER_HOST=tcp://docker:2376 -e DOCKER_TLS_VERIFY=1 -e DOCKER_CERT_PATH=/certs/client"
             reuseNode true
         }
     }
@@ -38,22 +13,23 @@ pipeline {
         DOCKER_REGISTRY = "docker.io"
         DOCKER_USERNAME = "zahidsajif"
         IMAGE_NAME = "${DOCKER_USERNAME}/aws-node-app"
-        IMAGE_TAG = "${IMAGE_NAME}:latest"
+        IMAGE_TAG = "${IMAGE_NAME}:${BUILD_NUMBER}"
+        IMAGE_LATEST = "${IMAGE_NAME}:latest"
         DOCKER_CREDS_ID = 'docker-hub-credentials'
     }
 
     stages {
+        stage('Checkout Code') {
+            steps {
+                checkout scm
+            }
+        }
+
         stage('Environment Setup') {
             steps {
                 echo 'Verifying Node environment...'
                 sh 'node --version'
                 sh 'npm --version'
-            }
-        }
-
-        stage('Checkout Code') {
-            steps {
-                checkout scm
             }
         }
 
@@ -67,13 +43,13 @@ pipeline {
         stage('Run Unit Tests') {
             steps {
                 echo 'Running unit tests...'
-                sh 'npm test || echo "No tests configured"'
+                sh 'npm test || echo "⚠️ No tests configured - consider adding tests"'
             }
         }
 
         stage('Install Docker CLI') {
             steps {
-                echo 'Installing Docker CLI via binary...'
+                echo 'Installing Docker CLI...'
                 sh '''
                     curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-24.0.7.tgz -o docker.tgz
                     tar -xzf docker.tgz
@@ -85,12 +61,27 @@ pipeline {
             }
         }
 
+        stage('Verify Docker Connection') {
+            steps {
+                echo 'Verifying Docker TLS connection...'
+                sh '''
+                    echo "DOCKER_HOST: $DOCKER_HOST"
+                    echo "DOCKER_CERT_PATH: $DOCKER_CERT_PATH"
+                    echo "Checking certificates:"
+                    ls -la /certs/client/ || echo "Certificate directory not found"
+                    echo "Testing Docker connection:"
+                    docker info
+                '''
+            }
+        }
+
         stage('Build Docker Image') {
             steps {
                 echo "Building Docker image: ${IMAGE_TAG}"
                 sh '''
-                    docker build -t ${IMAGE_TAG} .
-                    docker images | grep ${IMAGE_NAME} || true
+                    docker build -t ${IMAGE_TAG} -t ${IMAGE_LATEST} .
+                    echo "Verifying image was built:"
+                    docker images | grep ${IMAGE_NAME}
                 '''
             }
         }
@@ -105,6 +96,7 @@ pipeline {
                     sh '''
                         echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
                         docker push ${IMAGE_TAG}
+                        docker push ${IMAGE_LATEST}
                         docker logout
                     '''
                 }
@@ -115,7 +107,9 @@ pipeline {
     post {
         success {
             echo '✅ Pipeline completed successfully!'
-            echo "Docker image pushed: ${IMAGE_TAG}"
+            echo "Docker images pushed:"
+            echo "  - ${IMAGE_TAG}"
+            echo "  - ${IMAGE_LATEST}"
         }
         failure {
             echo '❌ Pipeline failed. Check the logs above.'
