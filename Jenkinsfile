@@ -75,7 +75,7 @@ EOF
                         echo "Copying certs from alternate location..."
                         mkdir -p /certs/client
                         # Try to find certs in Jenkins workspace
-                        find /var/jenkins_home -name "ca.pem" -path "*/certs/client/*" -exec dirname {} \; | head -1 | xargs -I {} cp -r {} /certs/client/
+                        find /var/jenkins_home -name "ca.pem" -path "*/certs/client/*" -exec dirname {} \\; | head -1 | xargs -I {} cp -r {} /certs/client/
                     }
                     
                     # Set cert path
