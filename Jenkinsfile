@@ -1,8 +1,35 @@
+# Dockerfile for aws-elastic-beanstalk-express-js-sample
+
+# use node.js 16 as the base image
+FROM node:16
+
+# set working directory inside the container
+WORKDIR /usr/src/app
+
+# copy package file
+COPY package*.json ./
+
+# install dependencies
+RUN npm install
+
+# copy the remaining code
+COPY . .
+
+# expose the port for app as per app.js
+EXPOSE 8080
+
+# start app
+CMD ["npm","start"]
+
+
+jenkinsfile
+
+
 pipeline {
     agent {
         docker {
             image 'node:16'
-            args '-u root:root --network host -v /var/run/docker.sock:/var/run/docker.sock'
+            args '--privileged -v /var/run/docker.sock:/var/run/docker.sock'
             reuseNode true
         }
     }
@@ -11,55 +38,50 @@ pipeline {
         DOCKER_REGISTRY = "docker.io"
         DOCKER_USERNAME = "zahidsajif"
         IMAGE_NAME = "${DOCKER_USERNAME}/aws-node-app"
-        IMAGE_TAG = "${IMAGE_NAME}:${BUILD_NUMBER}"
-        IMAGE_LATEST = "${IMAGE_NAME}:latest"
+        IMAGE_TAG = "${IMAGE_NAME}:latest"
         DOCKER_CREDS_ID = 'docker-hub-credentials'
     }
 
     stages {
+        stage('Environment Setup') {
+            steps {
+                echo 'Verifying Node environment...'
+                sh 'node --version'
+                sh 'npm --version'
+            }
+        }
+
         stage('Checkout Code') {
             steps {
                 checkout scm
             }
         }
 
-        stage('Environment Setup') {
-            steps {
-                echo 'Verifying Node environment...'
-                sh 'node --version'
-                sh 'npm --version'
-                sh 'whoami && pwd && ls -la'
-            }
-        }
-
         stage('Install Dependencies') {
             steps {
-                echo 'Installing dependencies with npm install...'
-                sh 'npm install'
+                echo 'Installing dependencies with npm install --save...'
+                sh 'npm install --save'
             }
         }
 
         stage('Run Unit Tests') {
             steps {
                 echo 'Running unit tests...'
-                sh 'npm test || echo "⚠️ No tests configured - consider adding tests"'
+                sh 'npm test || echo "No tests configured"'
             }
         }
 
-        stage('Verify Docker') {
+        stage('Install Docker CLI') {
             steps {
-                echo 'Checking Docker availability...'
-                script {
-                    try {
-                        sh 'docker --version'
-                    } catch (Exception e) {
-                        echo 'Docker not available in container, installing...'
-                        sh '''
-                            apt-get update && apt-get install -y docker.io
-                            docker --version
-                        '''
-                    }
-                }
+                echo 'Installing Docker CLI via binary...'
+                sh '''
+                    curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-24.0.7.tgz -o docker.tgz
+                    tar -xzf docker.tgz
+                    cp docker/docker /usr/local/bin/
+                    rm -rf docker docker.tgz
+                    chmod +x /usr/local/bin/docker
+                    docker --version
+                '''
             }
         }
 
@@ -67,8 +89,7 @@ pipeline {
             steps {
                 echo "Building Docker image: ${IMAGE_TAG}"
                 sh '''
-                    docker build -t ${IMAGE_TAG} -t ${IMAGE_LATEST} .
-                    echo "Verifying image was built:"
+                    docker build -t ${IMAGE_TAG} .
                     docker images | grep ${IMAGE_NAME} || true
                 '''
             }
@@ -84,7 +105,6 @@ pipeline {
                     sh '''
                         echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
                         docker push ${IMAGE_TAG}
-                        docker push ${IMAGE_LATEST}
                         docker logout
                     '''
                 }
@@ -95,9 +115,7 @@ pipeline {
     post {
         success {
             echo '✅ Pipeline completed successfully!'
-            echo "Docker images pushed:"
-            echo "  - ${IMAGE_TAG}"
-            echo "  - ${IMAGE_LATEST}"
+            echo "Docker image pushed: ${IMAGE_TAG}"
         }
         failure {
             echo '❌ Pipeline failed. Check the logs above.'
