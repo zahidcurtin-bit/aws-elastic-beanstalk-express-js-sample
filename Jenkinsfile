@@ -3,7 +3,7 @@ pipeline {
         docker {
             image 'node:16'
             // Mount the correct Docker certs volume with full compose project name
-            args '-u root:root -v project2-compose_jenkins-docker-certs:/certs/client:ro -e DOCKER_HOST=tcp://docker:2376 -e DOCKER_TLS_VERIFY=1 -e DOCKER_CERT_PATH=/certs/client'
+            args '-u root:root -v project2-compose_jenkins-docker-certs:/certs:ro -e DOCKER_HOST=tcp://docker:2376 -e DOCKER_TLS_VERIFY=1 -e DOCKER_CERT_PATH=/certs/client'
             reuseNode true
         }
     }
