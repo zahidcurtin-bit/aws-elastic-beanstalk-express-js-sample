@@ -1,6 +1,6 @@
 // ============================================================================
 // Jenkins Pipeline for Node.js Application CI/CD
-// Student ID: [YOUR_STUDENT_ID]
+// Student ID: 21997112
 // Project: ISEC6000 Assignment 2 - Secure DevOps
 // ============================================================================
 
@@ -8,19 +8,20 @@ pipeline {
     agent {
         docker {
             image 'node:16'
+            args '--network jenkins -e DOCKER_HOST=tcp://docker-dind:2375'
             reuseNode true
         }
     }
 
     environment {
         DOCKER_REGISTRY = "docker.io"
-        DOCKER_USERNAME = "zahidsajif"  // TODO: Replace with YOUR Docker Hub username
+        DOCKER_USERNAME = "zahidsajif"
         IMAGE_NAME = "${DOCKER_USERNAME}/aws-node-app"
         IMAGE_TAG = "${IMAGE_NAME}:${BUILD_NUMBER}"
         IMAGE_LATEST = "${IMAGE_NAME}:latest"
         DOCKER_CREDS_ID = 'docker-hub-credentials'
         SNYK_TOKEN = credentials('snyk-token')
-        DOCKER_HOST = "tcp://docker-dind:2375"
+        // Remove DOCKER_HOST from here - it needs to be in the agent args
     }
 
     stages {
@@ -38,6 +39,8 @@ pipeline {
                     pwd
                     echo "Directory Contents:"
                     ls -la
+                    echo "Testing Docker connection..."
+                    docker version
                 '''
             }
         }
@@ -119,12 +122,27 @@ pipeline {
                 echo 'Stage: Install Docker CLI'
                 echo '========================================='
                 sh '''
+                    # Install Docker CLI in the Node.js container
+                    echo "Installing Docker CLI..."
                     curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-24.0.7.tgz -o docker.tgz
                     tar -xzf docker.tgz
                     cp docker/docker /usr/local/bin/
                     rm -rf docker docker.tgz
                     chmod +x /usr/local/bin/docker
+                    
+                    echo "Docker version:"
                     docker --version
+                    
+                    echo "Testing connection to DinD..."
+                    if docker version > /dev/null 2>&1; then
+                        echo "✅ Successfully connected to DinD!"
+                        docker version
+                    else
+                        echo "❌ Failed to connect to DinD"
+                        echo "Current DOCKER_HOST: $DOCKER_HOST"
+                        echo "Testing with explicit DOCKER_HOST..."
+                        DOCKER_HOST=tcp://docker-dind:2375 docker version
+                    fi
                 '''
             }
         }
@@ -135,10 +153,11 @@ pipeline {
                 echo 'Stage: Build Docker Image'
                 echo '========================================='
                 sh '''
-                    docker build -t ${IMAGE_TAG} .
-                    docker tag ${IMAGE_TAG} ${IMAGE_LATEST}
+                    echo "Building Docker image: ${IMAGE_TAG}"
+                    DOCKER_HOST=tcp://docker-dind:2375 docker build -t ${IMAGE_TAG} .
+                    DOCKER_HOST=tcp://docker-dind:2375 docker tag ${IMAGE_TAG} ${IMAGE_LATEST}
                     echo "Successfully built Docker images:"
-                    docker images | grep ${IMAGE_NAME}
+                    DOCKER_HOST=tcp://docker-dind:2375 docker images | grep ${IMAGE_NAME}
                 '''
             }
         }
@@ -153,11 +172,13 @@ pipeline {
                     usernameVariable: 'DOCKER_USER', 
                     passwordVariable: 'DOCKER_PASS')]) {
                     sh '''
-                        echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
-                        docker push ${IMAGE_TAG}
-                        docker push ${IMAGE_LATEST}
+                        echo "Logging into Docker Hub..."
+                        DOCKER_HOST=tcp://docker-dind:2375 echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
+                        echo "Pushing images to registry..."
+                        DOCKER_HOST=tcp://docker-dind:2375 docker push ${IMAGE_TAG}
+                        DOCKER_HOST=tcp://docker-dind:2375 docker push ${IMAGE_LATEST}
                         echo "✅ Images pushed successfully!"
-                        docker logout
+                        DOCKER_HOST=tcp://docker-dind:2375 docker logout
                     '''
                 }
             }
@@ -185,7 +206,7 @@ pipeline {
         }
         always {
             echo 'Performing cleanup...'
-            sh 'docker image prune -f || true'
+            sh 'DOCKER_HOST=tcp://docker-dind:2375 docker image prune -f || true'
             echo "Build completed at: ${new Date()}"
         }
     }
