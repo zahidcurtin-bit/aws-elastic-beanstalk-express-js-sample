@@ -2,32 +2,41 @@ pipeline {
     agent {
         docker {
             image 'node:16'
-            args '-v /var/run/docker.sock:/var/run/docker.sock'
+            args '--privileged -v /var/run/docker.sock:/var/run/docker.sock'
+            reuseNode true
         }
     }
-    
+
     environment {
-        DOCKER_REGISTRY = 'docker.io'  // Change to your registry
-        DOCKER_IMAGE = 'your-dockerhub-username/your-app-name'  // Change this
-        DOCKER_TAG = "${BUILD_NUMBER}"
-        DOCKER_CREDENTIALS_ID = 'dockerhub-credentials'  // Jenkins credential ID
+        DOCKER_REGISTRY = "docker.io"
+        DOCKER_USERNAME = "zahidsajif"
+        IMAGE_NAME = "${DOCKER_USERNAME}/aws-node-app"
+        IMAGE_TAG = "${IMAGE_NAME}:latest"
+        DOCKER_CREDS_ID = 'docker-hub-credentials'
     }
-    
+
     stages {
-        stage('Checkout') {
+        stage('Environment Setup') {
             steps {
-                echo 'Checking out code from repository...'
+                echo 'Verifying Node environment...'
+                sh 'node --version'
+                sh 'npm --version'
+            }
+        }
+
+        stage('Checkout Code') {
+            steps {
                 checkout scm
             }
         }
-        
+
         stage('Install Dependencies') {
             steps {
-                echo 'Installing npm dependencies...'
+                echo 'Installing dependencies with npm install --save...'
                 sh 'npm install --save'
             }
         }
-        
+
         stage('Run Unit Tests') {
             steps {
                 echo 'Running unit tests...'
@@ -48,49 +57,45 @@ pipeline {
                 '''
             }
         }
-        
+
         stage('Build Docker Image') {
             steps {
-                echo 'Building Docker image...'
-                script {                    
-                    // Build the Docker image
-                    sh "docker build -t ${DOCKER_IMAGE}:${DOCKER_TAG} ."
-                    sh "docker tag ${DOCKER_IMAGE}:${DOCKER_TAG} ${DOCKER_IMAGE}:latest"
-                }
+                echo "Building Docker image: ${IMAGE_TAG}"
+                sh '''
+                    docker build -t ${IMAGE_TAG} .
+                    docker images | grep ${IMAGE_NAME} || true
+                '''
             }
         }
-        
+
         stage('Push to Docker Registry') {
             steps {
-                echo 'Pushing Docker image to registry...'
-                script {
-                    // Login to Docker registry and push
-                    withCredentials([usernamePassword(credentialsId: "${DOCKER_CREDENTIALS_ID}", 
-                                                      usernameVariable: 'DOCKER_USERNAME', 
-                                                      passwordVariable: 'DOCKER_PASSWORD')]) {
-                        sh '''
-                            echo $DOCKER_PASSWORD | docker login ${DOCKER_REGISTRY} -u $DOCKER_USERNAME --password-stdin
-                            docker push ${DOCKER_IMAGE}:${DOCKER_TAG}
-                            docker push ${DOCKER_IMAGE}:latest
-                        '''
-                    }
+                echo 'Pushing image to Docker Hub...'
+                withCredentials([usernamePassword(
+                    credentialsId: "${DOCKER_CREDS_ID}", 
+                    usernameVariable: 'DOCKER_USER', 
+                    passwordVariable: 'DOCKER_PASS')]) {
+                    sh '''
+                        echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
+                        docker push ${IMAGE_TAG}
+                        docker logout
+                    '''
                 }
             }
         }
     }
-    
+
     post {
         success {
-            echo 'Pipeline completed successfully!'
-            echo "Docker image pushed: ${DOCKER_IMAGE}:${DOCKER_TAG}"
+            echo '✅ Pipeline completed successfully!'
+            echo "Docker image pushed: ${IMAGE_TAG}"
         }
         failure {
-            echo 'Pipeline failed!'
+            echo '❌ Pipeline failed. Check the logs above.'
         }
         always {
             echo 'Cleaning up...'
-            sh 'docker logout ${DOCKER_REGISTRY} || true'
-            cleanWs()
+            sh 'docker image prune -f || true'
         }
     }
 }
