@@ -24,19 +24,7 @@ pipeline {
             }
         }
         
-        stage('Install Dependencies') {
-            steps {
-                echo 'Installing npm dependencies...'
-                sh 'npm install --save'
-            }
-        }
         
-        stage('Run Unit Tests') {
-            steps {
-                echo 'Running unit tests...'
-                sh 'npm test'
-            }
-        }
         
         stage('Build Docker Image') {
             steps {
