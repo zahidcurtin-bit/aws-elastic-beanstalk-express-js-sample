@@ -5,7 +5,7 @@
 // ============================================================================
 
 pipeline {
-    agent any  // Changed from docker agent to avoid initial pull issues
+    agent any
 
     environment {
         DOCKER_REGISTRY = "docker.io"
@@ -16,36 +16,10 @@ pipeline {
         DOCKER_CREDS_ID = 'docker-hub-credentials'
         SNYK_TOKEN = credentials('snyk-token')
         DOCKER_HOST = "tcp://docker-dind:2375"
-        NODE_IMAGE = "node:16-alpine"  // Using alpine for smaller size
+        NODE_IMAGE = "node:16-alpine"
     }
 
     stages {
-        stage('Environment Setup') {
-            agent {
-                docker {
-                    image "${NODE_IMAGE}"
-                    args '-v /var/run/docker.sock:/var/run/docker.sock'
-                    reuseNode true
-                }
-            }
-            steps {
-                echo '========================================='
-                echo 'Stage: Environment Setup'
-                echo '========================================='
-                sh '''
-                    echo "Node.js Version:"
-                    node --version
-                    echo "NPM Version:"
-                    npm --version
-                    echo "Current Directory:"
-                    pwd
-                    echo "Directory Contents:"
-                    ls -la
-                    echo "DOCKER_HOST: $DOCKER_HOST"
-                '''
-            }
-        }
-
         stage('Checkout Code') {
             steps {
                 echo '========================================='
@@ -59,6 +33,7 @@ pipeline {
             agent {
                 docker {
                     image "${NODE_IMAGE}"
+                    args '--network jenkins'
                     reuseNode true
                 }
             }
@@ -78,6 +53,7 @@ pipeline {
             agent {
                 docker {
                     image "${NODE_IMAGE}"
+                    args '--network jenkins'
                     reuseNode true
                 }
             }
@@ -100,6 +76,7 @@ pipeline {
             agent {
                 docker {
                     image "${NODE_IMAGE}"
+                    args '--network jenkins'
                     reuseNode true
                 }
             }
@@ -139,6 +116,7 @@ pipeline {
             agent {
                 docker {
                     image "${NODE_IMAGE}"
+                    args '--network jenkins'
                     reuseNode true
                 }
             }
