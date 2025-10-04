@@ -1,95 +1,141 @@
-// Jenkinsfile (root) — Node 16 + Snyk + Build & Push
 pipeline {
   agent any
-  environment {
-    // My forked repo and Docker Hub repo & Tag
-    IMAGE_NAME = 'zahidsajif/aws-express-app'
-    TAG        = "build-${env.BUILD_NUMBER}" 
 
-    // If package.json lives in a subfolder, set APP_DIR='subfolder'; otherwise '.'
-    APP_DIR = '.'
+  environment {
+    APP_NAME          = "aws-app"
+    DOCKER_REGISTRY   = "docker.io/balalabalala"
+    DOCKER_IMAGE      = "${DOCKER_REGISTRY}/${APP_NAME}:${env.BUILD_NUMBER}"
+
+    DOCKER_HOST       = "tcp://docker:2376"
+    DOCKER_CERT_PATH  = "/certs/client"
+    DOCKER_TLS_VERIFY = "1"
   }
 
-  options { timestamps() }
-
   stages {
-    stage('Checkout SCM') {
+    stage('Bootstrap docker CLI on controller') {
       steps {
-        echo "Source code has been checked out by Jenkins SCM."
-        sh 'ls -la'
-      }
-    }
-
-    stage('Install Dependencies (Node 16)') {
-      steps {
-        // Run Node 16 in a disposable container; mount Jenkins workspace and run npm install
         sh '''
-          docker run --rm \
-            -v "$WORKSPACE":/app -w /app \
-            node:16 \
-            sh -c "node -v && npm install --save"
+          set -eux
+          apt-get update
+          apt-get install -y docker.io
+          docker --version
         '''
       }
     }
 
-    stage('Run Tests (Node 16)') {
+    stage('Checkout') {
       steps {
-        // Do not break the pipeline if no tests are defined
-        sh '''
-          docker run --rm \
-            -v "$WORKSPACE":/app -w /app \
-            node:16 \
-            sh -c "npm test || echo 'No tests defined'"
-        '''
-      }
-      post {
-        // Collect JUnit if present; ignore if none
-        always { junit allowEmptyResults: true, testResults: 'junit*.xml' }
+        git branch: 'main', url: 'https://github.com/zbh1990/aws-elastic-beanstalk-express-js-sample.git'
+        sh 'mkdir -p logs'
       }
     }
 
-    stage('Dependency Scan (Snyk)') {
+    stage('Install Dependencies') {
+      agent { docker { image 'node:16'; args '-u root:root' } }
       steps {
-        // Use Snyk CLI and fail the build on High/Critical (severity >= high)
+        sh '''
+          bash -lc '
+            set -euo pipefail
+            mkdir -p logs
+            npm install --save 2>&1 | tee logs/install.log
+          '
+        '''
+        stash name: 'install-log', includes: 'logs/install.log'
+      }
+    }
+
+    stage('Run Tests') {
+      agent { docker { image 'node:16'; args '-u root:root' } }
+      steps {
+        sh '''
+          bash -lc '
+            set -euo pipefail
+            mkdir -p logs
+            npm test 2>&1 | tee logs/test.log
+          '
+        '''
+        stash name: 'test-log', includes: 'logs/test.log'
+      }
+    }
+
+    stage('Security Scan - Snyk') {
+      agent { docker { image 'node:16'; args '-u root:root' } }
+      steps {
         withCredentials([string(credentialsId: 'snyk-token', variable: 'SNYK_TOKEN')]) {
           sh '''
-            docker run --rm \
-              -e SNYK_TOKEN="$SNYK_TOKEN" \
-              -v "$WORKSPACE":/app -w /app \
-              snyk/snyk:docker snyk test \
-              --file=package.json \
-              --severity-threshold=high \
-              --json-file-output=/app/snyk-result.json
+            bash -lc '
+              set -euo pipefail
+              mkdir -p logs
+              npm install -g snyk
+              snyk auth "$SNYK_TOKEN"
+              snyk test --severity-threshold=high 2>&1 | tee logs/scan.log
+            '
           '''
         }
+         stash name: 'scan-log', includes: 'logs/scan.log'
       }
     }
 
     stage('Build Docker Image') {
       steps {
-        // Build image from the Dockerfile at repo root; use a unique, traceable tag
-        sh 'docker build -t "$IMAGE_NAME:$TAG" .'
+        sh '''
+          bash -lc '
+            set -euo pipefail
+            DOCKER_HOST=$DOCKER_HOST docker build -t ${DOCKER_IMAGE} . 2>&1 | tee logs/build.log
+          '
+        '''
       }
     }
 
-    stage('Push Docker image to Docker Hub') {
+
+
+   
+
+
+    stage('Push Docker Image') {
       steps {
-        // Login and push using Jenkins credentials (ID=docker-hub-credentials)
-        withCredentials([usernamePassword(credentialsId: 'docker-hub-credentials', usernameVariable: 'DH_USER', passwordVariable: 'DH_PASS')]) {
+        withCredentials([usernamePassword(credentialsId: 'dockerhub-credentials',
+                                          usernameVariable: 'DOCKER_USER',
+                                          passwordVariable: 'DOCKER_PASS')]) {
           sh '''
-            echo "$DH_PASS" | docker login -u "$DH_USER" --password-stdin
-            docker push "$IMAGE_NAME:$TAG"
+            bash -lc '
+              set -euo pipefail
+              echo "$DOCKER_PASS" | DOCKER_HOST=$DOCKER_HOST docker login -u "$DOCKER_USER" --password-stdin
+              DOCKER_HOST=$DOCKER_HOST docker push ${DOCKER_IMAGE} 2>&1 | tee logs/push.log
+            '
           '''
         }
       }
     }
+
+    stage('Collect Logs') {
+        steps {
+            sh 'mkdir -p logs'
+            script {
+            ['install-log','test-log','scan-log'].each { n ->
+                try { unstash n } catch (e) { echo "No stash for ${n} (${e.message})" }
+            }
+            }
+            sh '''
+            set -e
+            if [ -f /var/log/jenkins/audit.log.0 ]; then
+                cp /var/log/jenkins/audit.log.0 logs/audit.log
+                echo "Copied /var/log/jenkins/audit.log.0 -> logs/audit.log"
+            else
+                echo "audit.log.0 not found at /var/log/jenkins/audit.log.0 (skipping)"
+            fi
+            '''
+        }
+    }
+
   }
 
   post {
     always {
-      // Archive evidence for the report (Snyk JSON + Dockerfile)
-      archiveArtifacts artifacts: 'Dockerfile, snyk-result.json', onlyIfSuccessful: false
-      cleanWs()
+      archiveArtifacts artifacts: 'logs/install.log,logs/test.log,logs/scan.log,logs/build.log,logs/push.log,logs/audit.log',
+                        allowEmptyArchive: true, fingerprint: true
     }
+    success { echo 'Pipeline completed successfully' }
+    failure { echo 'Pipeline failed' }
   }
 }
