@@ -8,14 +8,13 @@ pipeline {
     agent {
         docker {
             image 'node:16'
-            args '--network jenkins'
             reuseNode true
         }
     }
 
     environment {
         DOCKER_REGISTRY = "docker.io"
-        DOCKER_USERNAME = "zahidsajif"
+        DOCKER_USERNAME = "zahidsajif"  // TODO: Replace with YOUR Docker Hub username
         IMAGE_NAME = "${DOCKER_USERNAME}/aws-node-app"
         IMAGE_TAG = "${IMAGE_NAME}:${BUILD_NUMBER}"
         IMAGE_LATEST = "${IMAGE_NAME}:latest"
@@ -39,7 +38,6 @@ pipeline {
                     pwd
                     echo "Directory Contents:"
                     ls -la
-                    echo "DOCKER_HOST: $DOCKER_HOST"
                 '''
             }
         }
@@ -121,27 +119,12 @@ pipeline {
                 echo 'Stage: Install Docker CLI'
                 echo '========================================='
                 sh '''
-                    # Install Docker CLI in the Node.js container
-                    echo "Installing Docker CLI..."
                     curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-24.0.7.tgz -o docker.tgz
                     tar -xzf docker.tgz
                     cp docker/docker /usr/local/bin/
                     rm -rf docker docker.tgz
                     chmod +x /usr/local/bin/docker
-                    
-                    echo "Docker version:"
                     docker --version
-                    
-                    echo "Testing connection to DinD..."
-                    docker version
-                    
-                    if [ $? -eq 0 ]; then
-                        echo "✅ Successfully connected to DinD!"
-                    else
-                        echo "❌ Failed to connect to DinD"
-                        echo "DOCKER_HOST: $DOCKER_HOST"
-                        exit 1
-                    fi
                 '''
             }
         }
@@ -152,7 +135,6 @@ pipeline {
                 echo 'Stage: Build Docker Image'
                 echo '========================================='
                 sh '''
-                    echo "Building Docker image: ${IMAGE_TAG}"
                     docker build -t ${IMAGE_TAG} .
                     docker tag ${IMAGE_TAG} ${IMAGE_LATEST}
                     echo "Successfully built Docker images:"
@@ -171,9 +153,7 @@ pipeline {
                     usernameVariable: 'DOCKER_USER', 
                     passwordVariable: 'DOCKER_PASS')]) {
                     sh '''
-                        echo "Logging into Docker Hub..."
                         echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
-                        echo "Pushing images to registry..."
                         docker push ${IMAGE_TAG}
                         docker push ${IMAGE_LATEST}
                         echo "✅ Images pushed successfully!"
