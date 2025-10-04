@@ -2,7 +2,7 @@ pipeline {
     agent {
         docker {
             image 'node:16'
-            args '-v /certs/client/client:/certs/client:ro -e DOCKER_HOST=tcp://docker-dind:2376 -e DOCKER_TLS_VERIFY=1 -e DOCKER_CERT_PATH=/certs/client'
+            args '-v jenkins-docker-certs:/certs:ro -e DOCKER_HOST=tcp://docker-dind:2376 -e DOCKER_TLS_VERIFY=1 -e DOCKER_CERT_PATH=/certs/client/client'
             reuseNode true
         }
     }
@@ -46,6 +46,10 @@ pipeline {
                     rm -rf docker docker.tgz
                     chmod +x /usr/local/bin/docker
                     docker --version
+                    
+                    # Verify certificates
+                    echo "Checking certificates..."
+                    ls -la /certs/client/
                 '''
             }
         }
