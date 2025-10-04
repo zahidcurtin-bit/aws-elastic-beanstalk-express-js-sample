@@ -32,7 +32,7 @@ pipeline {
         stage('Run Unit Tests') {
             steps {
                 echo 'Running unit tests...'
-                sh 'npm test || echo "No tests configured"'
+                sh 'npm test'
             }
         }
         
@@ -40,6 +40,11 @@ pipeline {
             steps {
                 echo 'Installing Docker CLI in Node container...'
                 sh '''
+                    # Update sources to use archive for Debian Buster (EOL)
+                    sed -i 's/deb.debian.org/archive.debian.org/g' /etc/apt/sources.list
+                    sed -i 's|security.debian.org|archive.debian.org/debian-security|g' /etc/apt/sources.list
+                    sed -i '/stretch-updates/d' /etc/apt/sources.list
+                    
                     apt-get update
                     apt-get install -y apt-transport-https ca-certificates curl gnupg lsb-release
                     curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
