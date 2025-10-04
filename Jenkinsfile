@@ -5,12 +5,7 @@
 // ============================================================================
 
 pipeline {
-    agent {
-        docker {
-            image 'node:16'
-            reuseNode true
-        }
-    }
+    agent any  // Changed from docker agent to avoid initial pull issues
 
     environment {
         DOCKER_REGISTRY = "docker.io"
@@ -21,10 +16,18 @@ pipeline {
         DOCKER_CREDS_ID = 'docker-hub-credentials'
         SNYK_TOKEN = credentials('snyk-token')
         DOCKER_HOST = "tcp://docker-dind:2375"
+        NODE_IMAGE = "node:16-alpine"  // Using alpine for smaller size
     }
 
     stages {
         stage('Environment Setup') {
+            agent {
+                docker {
+                    image "${NODE_IMAGE}"
+                    args '-v /var/run/docker.sock:/var/run/docker.sock'
+                    reuseNode true
+                }
+            }
             steps {
                 echo '========================================='
                 echo 'Stage: Environment Setup'
@@ -53,6 +56,12 @@ pipeline {
         }
 
         stage('Install Dependencies') {
+            agent {
+                docker {
+                    image "${NODE_IMAGE}"
+                    reuseNode true
+                }
+            }
             steps {
                 echo '========================================='
                 echo 'Stage: Install Dependencies'
@@ -66,6 +75,12 @@ pipeline {
         }
 
         stage('Run Unit Tests') {
+            agent {
+                docker {
+                    image "${NODE_IMAGE}"
+                    reuseNode true
+                }
+            }
             steps {
                 echo '========================================='
                 echo 'Stage: Run Unit Tests'
@@ -82,6 +97,12 @@ pipeline {
         }
 
         stage('Security Scan - Snyk') {
+            agent {
+                docker {
+                    image "${NODE_IMAGE}"
+                    reuseNode true
+                }
+            }
             steps {
                 echo '========================================='
                 echo 'Stage: Security Vulnerability Scan'
@@ -115,11 +136,20 @@ pipeline {
         }
 
         stage('Install Docker CLI') {
+            agent {
+                docker {
+                    image "${NODE_IMAGE}"
+                    reuseNode true
+                }
+            }
             steps {
                 echo '========================================='
                 echo 'Stage: Install Docker CLI'
                 echo '========================================='
                 sh '''
+                    # Install Docker CLI in Alpine
+                    apk add --no-cache curl tar
+                    
                     curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-24.0.7.tgz -o docker.tgz
                     tar -xzf docker.tgz
                     cp docker/docker /usr/local/bin/
