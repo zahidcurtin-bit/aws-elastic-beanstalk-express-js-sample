@@ -3,7 +3,12 @@ pipeline {
         timeout(time: 1, unit: 'HOURS')
     }
 
-    agent any
+    agent {
+    docker {
+        image 'node:16'
+        args '-u root'   // optional: run as root if you need permissions
+    }
+}
     stages {
         stage('build and push') {
             steps {
