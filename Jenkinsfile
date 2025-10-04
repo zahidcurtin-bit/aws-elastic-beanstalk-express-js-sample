@@ -2,7 +2,7 @@ pipeline {
     agent {
         docker {
             image 'node:16'
-            args '--network project2-compose_jenkins -v /certs/client/client:/certs/client:ro -e DOCKER_HOST=tcp://docker-dind:2376 -e DOCKER_TLS_VERIFY=1 -e DOCKER_CERT_PATH=/certs/client'
+            args '-v /certs/client/client:/certs/client:ro -e DOCKER_HOST=tcp://docker-dind:2376 -e DOCKER_TLS_VERIFY=1 -e DOCKER_CERT_PATH=/certs/client'
             reuseNode true
         }
     }
@@ -90,8 +90,7 @@ pipeline {
             echo 'Pipeline failed!'
         }
         always {
-            echo 'Cleaning up workspace...'
-            cleanWs()
+            echo 'Pipeline execution completed.'
         }
     }
 }
