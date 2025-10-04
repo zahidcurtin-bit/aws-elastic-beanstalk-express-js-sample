@@ -1,8 +1,8 @@
 pipeline {
     agent {
         docker {
-            image 'docker:latest'  // Use an image with Docker installed
-            args '--privileged'
+            image 'docker:latest'
+            args '-v /var/run/docker.sock:/var/run/docker.sock'  // ← ADD THIS BACK
         }
     }
     
