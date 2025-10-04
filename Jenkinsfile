@@ -2,138 +2,94 @@ pipeline {
     agent {
         docker {
             image 'node:16'
-            args '--user root --network project2-compose_jenkins -v jenkins-docker-certs:/certs/client:ro'
+            args '-v /certs/client/client:/certs/client:ro'
         }
     }
-
+    
     environment {
-        DOCKER_REGISTRY = "docker.io"
-        DOCKER_USERNAME = "zahidsajif"
-        IMAGE_NAME = "${DOCKER_USERNAME}/aws-node-app"
-        IMAGE_TAG = "${IMAGE_NAME}:${BUILD_NUMBER}"
-        IMAGE_LATEST = "${IMAGE_NAME}:latest"
-        DOCKER_CREDS_ID = 'docker-hub-credentials'
-        DOCKER_HOST = "tcp://docker:2376"
-        DOCKER_CERT_PATH = "/certs/client"
-        DOCKER_TLS_VERIFY = "1"
+        DOCKER_HOST = 'tcp://docker-dind:2376'
+        DOCKER_TLS_VERIFY = '1'
+        DOCKER_CERT_PATH = '/certs/client'
+        DOCKER_REGISTRY = 'docker.io'  // Change to your registry
+        DOCKER_IMAGE = 'your-dockerhub-username/your-app-name'  // Change this
+        DOCKER_TAG = "${BUILD_NUMBER}"
+        DOCKER_CREDENTIALS_ID = 'dockerhub-credentials'  // Jenkins credential ID
     }
-
+    
     stages {
-        stage('Setup Docker CLI') {
+        stage('Checkout') {
             steps {
-                echo 'Installing Docker CLI...'
-                sh '''
-                    # Install Docker CLI if not present
-                    if ! command -v docker >/dev/null 2>&1; then
-                        apt-get update
-                        apt-get install -y curl
-                        curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-24.0.7.tgz -o docker.tgz
-                        tar -xzf docker.tgz
-                        cp docker/docker /usr/local/bin/
-                        rm -rf docker docker.tgz
-                        chmod +x /usr/local/bin/docker
-                    fi
-                    docker --version
-                '''
-            }
-        }
-
-        stage('Verify Docker Connection') {
-            steps {
-                echo 'Testing Docker TLS connection...'
-                sh '''
-                    echo "=== TLS Configuration ==="
-                    echo "DOCKER_HOST: $DOCKER_HOST"
-                    echo "DOCKER_CERT_PATH: $DOCKER_CERT_PATH"
-                    echo "DOCKER_TLS_VERIFY: $DOCKER_TLS_VERIFY"
-                    
-                    echo "=== Certificate Files ==="
-                    ls -la $DOCKER_CERT_PATH/
-                    
-                    echo "=== Testing Connection ==="
-                    docker version
-                    docker info
-                    echo "✅ Docker TLS connection successful!"
-                '''
-            }
-        }
-
-        stage('Checkout Code') {
-            steps {
-                echo 'Checking out source code...'
+                echo 'Checking out code from repository...'
                 checkout scm
-                sh 'ls -la'
             }
         }
-
+        
         stage('Install Dependencies') {
             steps {
-                echo 'Installing dependencies...'
-                sh '''
-                    echo "Node: $(node --version)"
-                    echo "NPM: $(npm --version)"
-                    npm ci
-                '''
+                echo 'Installing npm dependencies...'
+                sh 'npm install --save'
             }
         }
-
-        stage('Run Tests') {
+        
+        stage('Run Unit Tests') {
             steps {
-                echo 'Running tests...'
-                sh '''
-                    if npm run 2>&1 | grep -q "test"; then
-                        npm test
-                    else
-                        echo "Creating default test script..."
-                        npm pkg set scripts.test="echo 'No tests specified' && exit 0"
-                        npm test
-                    fi
-                '''
+                echo 'Running unit tests...'
+                sh 'npm test'
             }
         }
-
+        
         stage('Build Docker Image') {
             steps {
-                echo "Building Docker image: ${IMAGE_TAG}"
-                sh '''
-                    docker build -t ${IMAGE_TAG} -t ${IMAGE_LATEST} .
-                    docker images | grep ${IMAGE_NAME}
-                    echo "✅ Image built successfully"
-                '''
+                echo 'Building Docker image...'
+                script {
+                    // Install Docker CLI in the Node container
+                    sh '''
+                        apt-get update
+                        apt-get install -y apt-transport-https ca-certificates curl gnupg lsb-release
+                        curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+                        echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/debian $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+                        apt-get update
+                        apt-get install -y docker-ce-cli
+                    '''
+                    
+                    // Build the Docker image
+                    sh "docker build -t ${DOCKER_IMAGE}:${DOCKER_TAG} ."
+                    sh "docker tag ${DOCKER_IMAGE}:${DOCKER_TAG} ${DOCKER_IMAGE}:latest"
+                }
             }
         }
-
-        stage('Push to Registry') {
+        
+        stage('Push to Docker Registry') {
             steps {
-                echo 'Pushing to Docker Hub...'
-                withCredentials([usernamePassword(
-                    credentialsId: "${DOCKER_CREDS_ID}",
-                    usernameVariable: 'DOCKER_USER',
-                    passwordVariable: 'DOCKER_PASS'
-                )]) {
-                    sh '''
-                        echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
-                        docker push ${IMAGE_TAG}
-                        docker push ${IMAGE_LATEST}
-                        docker logout
-                        echo "✅ Images pushed successfully!"
-                    '''
+                echo 'Pushing Docker image to registry...'
+                script {
+                    // Login to Docker registry and push
+                    withCredentials([usernamePassword(credentialsId: "${DOCKER_CREDENTIALS_ID}", 
+                                                      usernameVariable: 'DOCKER_USERNAME', 
+                                                      passwordVariable: 'DOCKER_PASSWORD')]) {
+                        sh '''
+                            echo $DOCKER_PASSWORD | docker login ${DOCKER_REGISTRY} -u $DOCKER_USERNAME --password-stdin
+                            docker push ${DOCKER_IMAGE}:${DOCKER_TAG}
+                            docker push ${DOCKER_IMAGE}:latest
+                        '''
+                    }
                 }
             }
         }
     }
-
+    
     post {
-        always {
-            echo 'Cleaning up...'
-            sh 'docker image prune -f || true'
-        }
         success {
-            echo '✅ Pipeline completed successfully!'
-            echo "Images published: ${IMAGE_TAG}, ${IMAGE_LATEST}"
+            echo 'Pipeline completed successfully!'
+            echo "Docker image pushed: ${DOCKER_IMAGE}:${DOCKER_TAG}"
         }
         failure {
-            echo '❌ Pipeline failed!'
+            echo 'Pipeline failed!'
+        }
+        always {
+            echo 'Cleaning up...'
+            sh 'docker logout ${DOCKER_REGISTRY} || true'
+            cleanWs()
         }
     }
 }
