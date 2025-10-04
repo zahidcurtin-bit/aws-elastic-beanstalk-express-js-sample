@@ -11,12 +11,12 @@ pipeline {
     IMAGE_NAME = 'zahidsajif/aws-express-app'
     TAG        = "build-${env.BUILD_NUMBER}" 
 
-    DOCKER_USERNAME = "zahidsajif"
+    /*DOCKER_USERNAME = "zahidsajif"
     IMAGE_NAME = "${DOCKER_USERNAME}/aws-node-app"
     IMAGE_TAG = "${IMAGE_NAME}:${BUILD_NUMBER}"
     IMAGE_LATEST = "${IMAGE_NAME}:latest"
     DOCKER_CREDS_ID = 'docker-hub-credentials'
-    SNYK_TOKEN = credentials('snyk-token')
+    SNYK_TOKEN = credentials('snyk-token')*/
     DOCKER_HOST = "tcp://docker:2376"
 
     // If package.json lives in a subfolder, set APP_DIR='subfolder'; otherwise '.'
