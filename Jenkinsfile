@@ -2,16 +2,15 @@ pipeline {
     agent {
         docker {
             image 'node:16'
-            args '-v jenkins-docker-certs:/certs:ro -e DOCKER_HOST=tcp://docker-dind:2376 -e DOCKER_TLS_VERIFY=1 -e DOCKER_CERT_PATH=/certs/client/client'
             reuseNode true
         }
     }
     
     environment {
         DOCKER_REGISTRY = 'docker.io'
-        DOCKER_IMAGE = 'your-dockerhub-username/your-app-name'  // Change this to your Docker Hub username/image name
+        DOCKER_IMAGE = 'your-dockerhub-username/aws-express-app'  // Update this
         DOCKER_TAG = "${BUILD_NUMBER}"
-        DOCKER_CREDENTIALS_ID = 'dockerhub-credentials'  // Jenkins credential ID for Docker Hub
+        DOCKER_CREDENTIALS_ID = 'dockerhub-credentials'
     }
     
     stages {
@@ -25,59 +24,92 @@ pipeline {
         stage('Install Dependencies') {
             steps {
                 echo 'Installing npm dependencies...'
-                sh 'npm install --save'
+                sh 'npm install'
             }
         }
         
         stage('Run Unit Tests') {
             steps {
                 echo 'Running unit tests...'
-                sh 'npm test || echo "No tests configured"'
-            }
-        }
-        
-        stage('Install Docker CLI') {
-            steps {
-                echo 'Installing Docker CLI via binary...'
-                sh '''
-                    curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-24.0.7.tgz -o docker.tgz
-                    tar -xzf docker.tgz
-                    cp docker/docker /usr/local/bin/
-                    rm -rf docker docker.tgz
-                    chmod +x /usr/local/bin/docker
-                    docker --version
-                    
-                    # Verify certificates
-                    echo "Checking certificates..."
-                    ls -la /certs/client/
-                '''
+                script {
+                    // Create basic test script if none exists
+                    sh '''
+                        if ! npm run | grep -q "test"; then
+                            echo "Adding test script to package.json..."
+                            npm set-script test "echo 'No tests configured' && exit 0"
+                        fi
+                        npm test
+                    '''
+                }
             }
         }
         
         stage('Build Docker Image') {
+            agent {
+                docker {
+                    image 'docker:24.0.9-cli'  // Use specific Docker CLI version matching your server
+                    args '--privileged -v /var/run/docker.sock:/var/run/docker.sock'
+                    reuseNode true
+                }
+            }
             steps {
                 echo 'Building Docker image...'
                 script {
+                    // Create Dockerfile if it doesn't exist
+                    sh '''
+                        if [ ! -f "Dockerfile" ]; then
+                            echo "Creating Dockerfile..."
+                            cat > Dockerfile << EOF
+                        FROM node:16-alpine
+                        WORKDIR /app
+                        COPY package*.json ./
+                        RUN npm install --production
+                        COPY . .
+                        EXPOSE 8080
+                        USER node
+                        CMD ["npm", "start"]
+                        EOF
+                        fi
+                        
+                        echo "Dockerfile contents:"
+                        cat Dockerfile
+                    '''
+                    
                     sh """
+                        echo "Building Docker image..."
                         docker build -t ${DOCKER_IMAGE}:${DOCKER_TAG} .
                         docker tag ${DOCKER_IMAGE}:${DOCKER_TAG} ${DOCKER_IMAGE}:latest
+                        echo "Images built:"
+                        docker images | grep ${DOCKER_IMAGE}
                     """
                 }
             }
         }
         
         stage('Push to Docker Registry') {
+            agent {
+                docker {
+                    image 'docker:24.0.9-cli'
+                    args '--privileged -v /var/run/docker.sock:/var/run/docker.sock'
+                    reuseNode true
+                }
+            }
             steps {
                 echo 'Pushing Docker image to registry...'
                 script {
-                    withCredentials([usernamePassword(credentialsId: "${DOCKER_CREDENTIALS_ID}", 
-                                                      usernameVariable: 'DOCKER_USERNAME', 
-                                                      passwordVariable: 'DOCKER_PASSWORD')]) {
+                    withCredentials([usernamePassword(
+                        credentialsId: "${DOCKER_CREDENTIALS_ID}", 
+                        usernameVariable: 'DOCKER_USERNAME', 
+                        passwordVariable: 'DOCKER_PASSWORD'
+                    )]) {
                         sh '''
-                            echo $DOCKER_PASSWORD | docker login ${DOCKER_REGISTRY} -u $DOCKER_USERNAME --password-stdin
+                            echo "Logging into Docker Hub..."
+                            echo $DOCKER_PASSWORD | docker login -u $DOCKER_USERNAME --password-stdin
+                            echo "Pushing images..."
                             docker push ${DOCKER_IMAGE}:${DOCKER_TAG}
                             docker push ${DOCKER_IMAGE}:latest
-                            docker logout ${DOCKER_REGISTRY}
+                            docker logout
+                            echo "Push completed successfully!"
                         '''
                     }
                 }
@@ -88,13 +120,17 @@ pipeline {
     post {
         success {
             echo 'Pipeline completed successfully!'
-            echo "Docker image pushed: ${DOCKER_IMAGE}:${DOCKER_TAG}"
+            echo "Docker image: ${DOCKER_IMAGE}:${DOCKER_TAG}"
         }
         failure {
             echo 'Pipeline failed!'
         }
         always {
-            echo 'Pipeline execution completed.'
+            echo 'Cleaning up...'
+            sh '''
+                # Clean up Docker images to save space
+                docker images -q ${DOCKER_IMAGE} | xargs -r docker rmi -f 2>/dev/null || true
+            '''
         }
     }
 }
