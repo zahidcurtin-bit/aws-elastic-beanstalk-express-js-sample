@@ -34,21 +34,25 @@ pipeline {
                 sh 'npm test || echo "No tests configured"'
             }
         }
+
+        stage('Install Docker CLI') {
+            steps {
+                echo 'Installing Docker CLI via binary...'
+                sh '''
+                    curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-24.0.7.tgz -o docker.tgz
+                    tar -xzf docker.tgz
+                    cp docker/docker /usr/local/bin/
+                    rm -rf docker docker.tgz
+                    chmod +x /usr/local/bin/docker
+                    docker --version
+                '''
+            }
+        }
         
         stage('Build Docker Image') {
             steps {
                 echo 'Building Docker image...'
-                script {
-                    // Install Docker CLI in the Node container
-                    sh '''
-                        apt-get update
-                        apt-get install -y apt-transport-https ca-certificates curl gnupg lsb-release
-                        curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
-                        echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/debian $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
-                        apt-get update
-                        apt-get install -y docker-ce-cli
-                    '''
-                    
+                script {                    
                     // Build the Docker image
                     sh "docker build -t ${DOCKER_IMAGE}:${DOCKER_TAG} ."
                     sh "docker tag ${DOCKER_IMAGE}:${DOCKER_TAG} ${DOCKER_IMAGE}:latest"
