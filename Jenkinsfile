@@ -1,23 +1,10 @@
-
 // Jenkinsfile (root) — Node 16 + Snyk + Build & Push
 pipeline {
   agent any
   environment {
-    // Talk to Docker-in-Docker (DinD) over TLS (From Task 2)
-    DOCKER_CERT_PATH  = '/certs/client'
-    DOCKER_TLS_VERIFY = '1'
-
     // My forked repo and Docker Hub repo & Tag
     IMAGE_NAME = 'zahidsajif/aws-express-app'
     TAG        = "build-${env.BUILD_NUMBER}" 
-
-    /*DOCKER_USERNAME = "zahidsajif"
-    IMAGE_NAME = "${DOCKER_USERNAME}/aws-node-app"
-    IMAGE_TAG = "${IMAGE_NAME}:${BUILD_NUMBER}"
-    IMAGE_LATEST = "${IMAGE_NAME}:latest"
-    DOCKER_CREDS_ID = 'docker-hub-credentials'
-    SNYK_TOKEN = credentials('snyk-token')*/
-    DOCKER_HOST = "tcp://docker:2376"
 
     // If package.json lives in a subfolder, set APP_DIR='subfolder'; otherwise '.'
     APP_DIR = '.'
@@ -87,7 +74,7 @@ pipeline {
 
     stage('Push Docker image to Docker Hub') {
       steps {
-        // Login and push using Jenkins credentials (ID=dockerhub)
+        // Login and push using Jenkins credentials (ID=docker-hub-credentials)
         withCredentials([usernamePassword(credentialsId: 'docker-hub-credentials', usernameVariable: 'DH_USER', passwordVariable: 'DH_PASS')]) {
           sh '''
             echo "$DH_PASS" | docker login -u "$DH_USER" --password-stdin
