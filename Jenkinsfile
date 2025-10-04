@@ -1,6 +1,6 @@
 // ============================================================================
 // Jenkins Pipeline for Node.js Application CI/CD
-// Student ID: 21997112
+// Student ID: [YOUR_STUDENT_ID]
 // Project: ISEC6000 Assignment 2 - Secure DevOps
 // ============================================================================
 
@@ -8,7 +8,7 @@ pipeline {
     agent {
         docker {
             image 'node:16'
-            args '--network project2-compose_jenkins -e DOCKER_HOST=tcp://docker-dind:2375'
+            args '--network jenkins'
             reuseNode true
         }
     }
@@ -21,6 +21,7 @@ pipeline {
         IMAGE_LATEST = "${IMAGE_NAME}:latest"
         DOCKER_CREDS_ID = 'docker-hub-credentials'
         SNYK_TOKEN = credentials('snyk-token')
+        DOCKER_HOST = "tcp://docker-dind:2375"
     }
 
     stages {
@@ -38,8 +39,7 @@ pipeline {
                     pwd
                     echo "Directory Contents:"
                     ls -la
-                    echo "Testing Docker connection..."
-                    docker version
+                    echo "DOCKER_HOST: $DOCKER_HOST"
                 '''
             }
         }
@@ -121,7 +121,8 @@ pipeline {
                 echo 'Stage: Install Docker CLI'
                 echo '========================================='
                 sh '''
-                    # Install Docker CLI
+                    # Install Docker CLI in the Node.js container
+                    echo "Installing Docker CLI..."
                     curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-24.0.7.tgz -o docker.tgz
                     tar -xzf docker.tgz
                     cp docker/docker /usr/local/bin/
@@ -138,6 +139,7 @@ pipeline {
                         echo "✅ Successfully connected to DinD!"
                     else
                         echo "❌ Failed to connect to DinD"
+                        echo "DOCKER_HOST: $DOCKER_HOST"
                         exit 1
                     fi
                 '''
