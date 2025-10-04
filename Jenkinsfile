@@ -8,7 +8,7 @@ pipeline {
     agent {
         docker {
             image 'node:16'
-            args '--network jenkins -e DOCKER_HOST=tcp://docker-dind:2375'
+            args '--network project2-compose_jenkins -e DOCKER_HOST=tcp://docker-dind:2375'
             reuseNode true
         }
     }
@@ -21,7 +21,6 @@ pipeline {
         IMAGE_LATEST = "${IMAGE_NAME}:latest"
         DOCKER_CREDS_ID = 'docker-hub-credentials'
         SNYK_TOKEN = credentials('snyk-token')
-        // Remove DOCKER_HOST from here - it needs to be in the agent args
     }
 
     stages {
@@ -122,8 +121,7 @@ pipeline {
                 echo 'Stage: Install Docker CLI'
                 echo '========================================='
                 sh '''
-                    # Install Docker CLI in the Node.js container
-                    echo "Installing Docker CLI..."
+                    # Install Docker CLI
                     curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-24.0.7.tgz -o docker.tgz
                     tar -xzf docker.tgz
                     cp docker/docker /usr/local/bin/
@@ -134,14 +132,13 @@ pipeline {
                     docker --version
                     
                     echo "Testing connection to DinD..."
-                    if docker version > /dev/null 2>&1; then
+                    docker version
+                    
+                    if [ $? -eq 0 ]; then
                         echo "✅ Successfully connected to DinD!"
-                        docker version
                     else
                         echo "❌ Failed to connect to DinD"
-                        echo "Current DOCKER_HOST: $DOCKER_HOST"
-                        echo "Testing with explicit DOCKER_HOST..."
-                        DOCKER_HOST=tcp://docker-dind:2375 docker version
+                        exit 1
                     fi
                 '''
             }
@@ -154,10 +151,10 @@ pipeline {
                 echo '========================================='
                 sh '''
                     echo "Building Docker image: ${IMAGE_TAG}"
-                    DOCKER_HOST=tcp://docker-dind:2375 docker build -t ${IMAGE_TAG} .
-                    DOCKER_HOST=tcp://docker-dind:2375 docker tag ${IMAGE_TAG} ${IMAGE_LATEST}
+                    docker build -t ${IMAGE_TAG} .
+                    docker tag ${IMAGE_TAG} ${IMAGE_LATEST}
                     echo "Successfully built Docker images:"
-                    DOCKER_HOST=tcp://docker-dind:2375 docker images | grep ${IMAGE_NAME}
+                    docker images | grep ${IMAGE_NAME}
                 '''
             }
         }
@@ -173,12 +170,12 @@ pipeline {
                     passwordVariable: 'DOCKER_PASS')]) {
                     sh '''
                         echo "Logging into Docker Hub..."
-                        DOCKER_HOST=tcp://docker-dind:2375 echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
+                        echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
                         echo "Pushing images to registry..."
-                        DOCKER_HOST=tcp://docker-dind:2375 docker push ${IMAGE_TAG}
-                        DOCKER_HOST=tcp://docker-dind:2375 docker push ${IMAGE_LATEST}
+                        docker push ${IMAGE_TAG}
+                        docker push ${IMAGE_LATEST}
                         echo "✅ Images pushed successfully!"
-                        DOCKER_HOST=tcp://docker-dind:2375 docker logout
+                        docker logout
                     '''
                 }
             }
@@ -206,7 +203,7 @@ pipeline {
         }
         always {
             echo 'Performing cleanup...'
-            sh 'DOCKER_HOST=tcp://docker-dind:2375 docker image prune -f || true'
+            sh 'docker image prune -f || true'
             echo "Build completed at: ${new Date()}"
         }
     }
