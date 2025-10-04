@@ -16,7 +16,6 @@ pipeline {
         DOCKER_CREDS_ID = 'docker-hub-credentials'
         SNYK_TOKEN = credentials('snyk-token')
         DOCKER_HOST = "tcp://docker-dind:2375"
-        NODE_IMAGE = "node:16-alpine"
     }
 
     stages {
@@ -30,76 +29,63 @@ pipeline {
         }
 
         stage('Install Dependencies') {
-            agent {
-                docker {
-                    image "${NODE_IMAGE}"
-                    args '--network jenkins'
-                    reuseNode true
-                }
-            }
             steps {
                 echo '========================================='
                 echo 'Stage: Install Dependencies'
                 echo '========================================='
-                sh '''
-                    npm install --save
-                    echo "Dependencies installed successfully!"
-                    npm list --depth=0 || true
-                '''
+                script {
+                    docker.image('node:16').inside('--network jenkins') {
+                        sh '''
+                            npm install --save
+                            echo "Dependencies installed successfully!"
+                            npm list --depth=0 || true
+                        '''
+                    }
+                }
             }
         }
 
         stage('Run Unit Tests') {
-            agent {
-                docker {
-                    image "${NODE_IMAGE}"
-                    args '--network jenkins'
-                    reuseNode true
-                }
-            }
             steps {
                 echo '========================================='
                 echo 'Stage: Run Unit Tests'
                 echo '========================================='
                 script {
-                    def testResult = sh(script: 'npm test', returnStatus: true)
-                    if (testResult == 0) {
-                        echo '✅ All tests passed successfully!'
-                    } else {
-                        echo '⚠️ No tests configured or tests failed'
+                    docker.image('node:16').inside('--network jenkins') {
+                        def testResult = sh(script: 'npm test', returnStatus: true)
+                        if (testResult == 0) {
+                            echo '✅ All tests passed successfully!'
+                        } else {
+                            echo '⚠️ No tests configured or tests failed'
+                        }
                     }
                 }
             }
         }
 
         stage('Security Scan - Snyk') {
-            agent {
-                docker {
-                    image "${NODE_IMAGE}"
-                    args '--network jenkins'
-                    reuseNode true
-                }
-            }
             steps {
                 echo '========================================='
                 echo 'Stage: Security Vulnerability Scan'
                 echo '========================================='
                 script {
-                    try {
-                        sh '''
-                            npm install -g snyk
-                            snyk auth ${SNYK_TOKEN}
-                            snyk test --json > snyk-report.json || true
-                            echo "==================================="
-                            echo "Snyk Vulnerability Scan Results"
-                            echo "==================================="
-                            snyk test --severity-threshold=high
-                        '''
-                        echo '✅ Security scan passed!'
-                    } catch (Exception e) {
-                        echo '❌ SECURITY SCAN FAILED!'
-                        echo 'High or Critical vulnerabilities detected!'
-                        error("Pipeline stopped due to security vulnerabilities")
+                    docker.image('node:16').inside('--network jenkins') {
+                        try {
+                            sh '''
+                                npm install -g snyk
+                                snyk auth ${SNYK_TOKEN}
+                                snyk test --json > snyk-report.json || true
+                                echo "==================================="
+                                echo "Snyk Vulnerability Scan Results"
+                                echo "==================================="
+                                snyk test --severity-threshold=high
+                            '''
+                            echo '✅ Security scan passed!'
+                        } catch (Exception e) {
+                            echo '❌ SECURITY SCAN FAILED!'
+                            echo 'High or Critical vulnerabilities detected!'
+                            error("Pipeline stopped due to security vulnerabilities")
+                        }
                     }
                 }
             }
@@ -112,77 +98,54 @@ pipeline {
             }
         }
 
-        stage('Install Docker CLI') {
-            agent {
-                docker {
-                    image "${NODE_IMAGE}"
-                    args '--network jenkins'
-                    reuseNode true
-                }
-            }
+        stage('Build and Push Docker Image') {
             steps {
                 echo '========================================='
-                echo 'Stage: Install Docker CLI'
+                echo 'Stage: Build and Push Docker Image'
                 echo '========================================='
-                sh '''
-                    # Install Docker CLI in Alpine
-                    apk add --no-cache curl tar
-                    
-                    curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-24.0.7.tgz -o docker.tgz
-                    tar -xzf docker.tgz
-                    cp docker/docker /usr/local/bin/
-                    rm -rf docker docker.tgz
-                    chmod +x /usr/local/bin/docker
-                    
-                    echo "Docker version:"
-                    docker --version
-                    
-                    echo "Testing connection to DinD..."
-                    DOCKER_HOST=tcp://docker-dind:2375 docker version
-                    
-                    if [ $? -eq 0 ]; then
-                        echo "✅ Successfully connected to DinD!"
-                    else
-                        echo "❌ Failed to connect to DinD"
-                        exit 1
-                    fi
-                '''
-            }
-        }
-
-        stage('Build Docker Image') {
-            steps {
-                echo '========================================='
-                echo 'Stage: Build Docker Image'
-                echo '========================================='
-                sh '''
-                    echo "Building Docker image: ${IMAGE_TAG}"
-                    DOCKER_HOST=tcp://docker-dind:2375 docker build -t ${IMAGE_TAG} .
-                    DOCKER_HOST=tcp://docker-dind:2375 docker tag ${IMAGE_TAG} ${IMAGE_LATEST}
-                    echo "Successfully built Docker images:"
-                    DOCKER_HOST=tcp://docker-dind:2375 docker images | grep ${IMAGE_NAME}
-                '''
-            }
-        }
-
-        stage('Push to Docker Registry') {
-            steps {
-                echo '========================================='
-                echo 'Stage: Push to Docker Registry'
-                echo '========================================='
-                withCredentials([usernamePassword(
-                    credentialsId: "${DOCKER_CREDS_ID}", 
-                    usernameVariable: 'DOCKER_USER', 
-                    passwordVariable: 'DOCKER_PASS')]) {
-                    sh '''
-                        echo "Logging into Docker Hub..."
-                        DOCKER_HOST=tcp://docker-dind:2375 echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
-                        echo "Pushing images to registry..."
-                        DOCKER_HOST=tcp://docker-dind:2375 docker push ${IMAGE_TAG}
-                        DOCKER_HOST=tcp://docker-dind:2375 docker push ${IMAGE_LATEST}
-                        echo "✅ Images pushed successfully!"
-                        DOCKER_HOST=tcp://docker-dind:2375 docker logout
-                    '''
+                script {
+                    docker.image('node:16').inside('-u root --network jenkins') {
+                        // Install Docker CLI
+                        sh '''
+                            echo "Installing Docker CLI..."
+                            curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-24.0.7.tgz -o docker.tgz
+                            tar -xzf docker.tgz
+                            cp docker/docker /usr/local/bin/
+                            rm -rf docker docker.tgz
+                            chmod +x /usr/local/bin/docker
+                            
+                            echo "Docker version:"
+                            docker --version
+                            
+                            echo "Testing connection to DinD..."
+                            DOCKER_HOST=tcp://docker-dind:2375 docker version
+                        '''
+                        
+                        // Build Docker Image
+                        sh '''
+                            echo "Building Docker image: ${IMAGE_TAG}"
+                            DOCKER_HOST=tcp://docker-dind:2375 docker build -t ${IMAGE_TAG} .
+                            DOCKER_HOST=tcp://docker-dind:2375 docker tag ${IMAGE_TAG} ${IMAGE_LATEST}
+                            echo "Successfully built Docker images:"
+                            DOCKER_HOST=tcp://docker-dind:2375 docker images | grep ${IMAGE_NAME}
+                        '''
+                        
+                        // Push to Docker Registry
+                        withCredentials([usernamePassword(
+                            credentialsId: "${DOCKER_CREDS_ID}", 
+                            usernameVariable: 'DOCKER_USER', 
+                            passwordVariable: 'DOCKER_PASS')]) {
+                            sh '''
+                                echo "Logging into Docker Hub..."
+                                DOCKER_HOST=tcp://docker-dind:2375 echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
+                                echo "Pushing images to registry..."
+                                DOCKER_HOST=tcp://docker-dind:2375 docker push ${IMAGE_TAG}
+                                DOCKER_HOST=tcp://docker-dind:2375 docker push ${IMAGE_LATEST}
+                                echo "✅ Images pushed successfully!"
+                                DOCKER_HOST=tcp://docker-dind:2375 docker logout
+                            '''
+                        }
+                    }
                 }
             }
         }
