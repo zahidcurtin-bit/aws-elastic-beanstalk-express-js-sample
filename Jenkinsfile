@@ -1,52 +1,123 @@
+// ============================================================================
+// Jenkins Pipeline for Node.js Application CI/CD
+// Student ID: [YOUR_STUDENT_ID]
+// Project: ISEC6000 Assignment 2 - Secure DevOps
+// ============================================================================
+
 pipeline {
     agent {
         docker {
             image 'node:16'
-            args '--privileged -v /var/run/docker.sock:/var/run/docker.sock'
             reuseNode true
         }
     }
 
     environment {
         DOCKER_REGISTRY = "docker.io"
-        DOCKER_USERNAME = "zahidsajif"
+        DOCKER_USERNAME = "zahidsajif"  // TODO: Replace with YOUR Docker Hub username
         IMAGE_NAME = "${DOCKER_USERNAME}/aws-node-app"
-        IMAGE_TAG = "${IMAGE_NAME}:latest"
+        IMAGE_TAG = "${IMAGE_NAME}:${BUILD_NUMBER}"
+        IMAGE_LATEST = "${IMAGE_NAME}:latest"
         DOCKER_CREDS_ID = 'docker-hub-credentials'
+        SNYK_TOKEN = credentials('snyk-token')
+        DOCKER_HOST = "tcp://docker-dind:2375"
     }
 
     stages {
         stage('Environment Setup') {
             steps {
-                echo 'Verifying Node environment...'
-                sh 'node --version'
-                sh 'npm --version'
+                echo '========================================='
+                echo 'Stage: Environment Setup'
+                echo '========================================='
+                sh '''
+                    echo "Node.js Version:"
+                    node --version
+                    echo "NPM Version:"
+                    npm --version
+                    echo "Current Directory:"
+                    pwd
+                    echo "Directory Contents:"
+                    ls -la
+                '''
             }
         }
 
         stage('Checkout Code') {
             steps {
+                echo '========================================='
+                echo 'Stage: Checkout Code'
+                echo '========================================='
                 checkout scm
             }
         }
 
         stage('Install Dependencies') {
             steps {
-                echo 'Installing dependencies with npm install --save...'
-                sh 'npm install --save'
+                echo '========================================='
+                echo 'Stage: Install Dependencies'
+                echo '========================================='
+                sh '''
+                    npm install --save
+                    echo "Dependencies installed successfully!"
+                    npm list --depth=0 || true
+                '''
             }
         }
 
         stage('Run Unit Tests') {
             steps {
-                echo 'Running unit tests...'
-                sh 'npm test || echo "No tests configured"'
+                echo '========================================='
+                echo 'Stage: Run Unit Tests'
+                echo '========================================='
+                script {
+                    def testResult = sh(script: 'npm test', returnStatus: true)
+                    if (testResult == 0) {
+                        echo '✅ All tests passed successfully!'
+                    } else {
+                        echo '⚠️ No tests configured or tests failed'
+                    }
+                }
+            }
+        }
+
+        stage('Security Scan - Snyk') {
+            steps {
+                echo '========================================='
+                echo 'Stage: Security Vulnerability Scan'
+                echo '========================================='
+                script {
+                    try {
+                        sh '''
+                            npm install -g snyk
+                            snyk auth ${SNYK_TOKEN}
+                            snyk test --json > snyk-report.json || true
+                            echo "==================================="
+                            echo "Snyk Vulnerability Scan Results"
+                            echo "==================================="
+                            snyk test --severity-threshold=high
+                        '''
+                        echo '✅ Security scan passed!'
+                    } catch (Exception e) {
+                        echo '❌ SECURITY SCAN FAILED!'
+                        echo 'High or Critical vulnerabilities detected!'
+                        error("Pipeline stopped due to security vulnerabilities")
+                    }
+                }
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'snyk-report.json', 
+                                     allowEmptyArchive: true,
+                                     fingerprint: true
+                }
             }
         }
 
         stage('Install Docker CLI') {
             steps {
-                echo 'Installing Docker CLI via binary...'
+                echo '========================================='
+                echo 'Stage: Install Docker CLI'
+                echo '========================================='
                 sh '''
                     curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-24.0.7.tgz -o docker.tgz
                     tar -xzf docker.tgz
@@ -60,17 +131,23 @@ pipeline {
 
         stage('Build Docker Image') {
             steps {
-                echo "Building Docker image: ${IMAGE_TAG}"
+                echo '========================================='
+                echo 'Stage: Build Docker Image'
+                echo '========================================='
                 sh '''
                     docker build -t ${IMAGE_TAG} .
-                    docker images | grep ${IMAGE_NAME} || true
+                    docker tag ${IMAGE_TAG} ${IMAGE_LATEST}
+                    echo "Successfully built Docker images:"
+                    docker images | grep ${IMAGE_NAME}
                 '''
             }
         }
 
         stage('Push to Docker Registry') {
             steps {
-                echo 'Pushing image to Docker Hub...'
+                echo '========================================='
+                echo 'Stage: Push to Docker Registry'
+                echo '========================================='
                 withCredentials([usernamePassword(
                     credentialsId: "${DOCKER_CREDS_ID}", 
                     usernameVariable: 'DOCKER_USER', 
@@ -78,6 +155,8 @@ pipeline {
                     sh '''
                         echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
                         docker push ${IMAGE_TAG}
+                        docker push ${IMAGE_LATEST}
+                        echo "✅ Images pushed successfully!"
                         docker logout
                     '''
                 }
@@ -87,15 +166,27 @@ pipeline {
 
     post {
         success {
-            echo '✅ Pipeline completed successfully!'
-            echo "Docker image pushed: ${IMAGE_TAG}"
+            echo ''
+            echo '========================================='
+            echo '✅ PIPELINE COMPLETED SUCCESSFULLY!'
+            echo '========================================='
+            echo "✅ Docker images built and pushed:"
+            echo "   - ${IMAGE_TAG}"
+            echo "   - ${IMAGE_LATEST}"
+            echo '========================================='
         }
         failure {
-            echo '❌ Pipeline failed. Check the logs above.'
+            echo ''
+            echo '========================================='
+            echo '❌ PIPELINE FAILED!'
+            echo '========================================='
+            echo '❌ Check the logs above for details'
+            echo '========================================='
         }
         always {
-            echo 'Cleaning up...'
+            echo 'Performing cleanup...'
             sh 'docker image prune -f || true'
+            echo "Build completed at: ${new Date()}"
         }
     }
 }
