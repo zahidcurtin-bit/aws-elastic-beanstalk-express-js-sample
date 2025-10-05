@@ -27,7 +27,7 @@ pipeline {
                     // Run npm install inside a Node.js container
                     sh '''
                       docker run --rm \
-                        -v $PWD:/app \
+                        -v ${WORKSPACE}:/app \
                         -w /app \
                         node:16 \
                         sh -c "node -v && npm install --save"
@@ -44,7 +44,7 @@ pipeline {
                     // If tests fail, continue but log message
                     sh '''
                       docker run --rm \
-                        -v $PWD:/app \
+                        -v ${WORKSPACE}:/app \
                         -w /app \
                         node:16 \
                         sh -c "npm test || echo 'Tests failed or skipped'"
@@ -62,7 +62,7 @@ pipeline {
                     def snykResult = sh(
                         script: '''
                           docker run --rm \
-                            -v $PWD:/app \
+                            -v ${WORKSPACE}:/app \
                             -w /app \
                             -e SNYK_TOKEN=$SNYK_TOKEN \
                             snyk/snyk:node \
@@ -70,7 +70,7 @@ pipeline {
                           
                           # Also print results in terminal
                           docker run --rm \
-                            -v $PWD:/app \
+                            -v ${WORKSPACE}:/app \
                             -w /app \
                             -e SNYK_TOKEN=$SNYK_TOKEN \
                             snyk/snyk:node \
