@@ -1,19 +1,21 @@
 pipeline {
-    agent any
+    agent any   // Run pipeline on any available Jenkins agent
 
     environment {
+        // Define global environment variables
         DOCKER_REGISTRY = "docker.io"
         DOCKER_USERNAME = "zahidsajif"
-        IMAGE_NAME = "${DOCKER_USERNAME}/aws-node-app"
-        IMAGE_TAG = "latest"
-        SNYK_TOKEN = credentials('snyk-api-token') // Add Snyk token in Jenkins credentials
+        IMAGE_NAME = "${DOCKER_USERNAME}/aws-node-app" // Docker image name
+        IMAGE_TAG = "latest"                           // Always tag latest
+        SNYK_TOKEN = credentials('snyk-api-token')     // Use Snyk token stored in Jenkins credentials
     }
 
     options {
-        // Store logs and artifacts
+        // Keep only last 10 builds + artifacts
         buildDiscarder(logRotator(numToKeepStr: '10', artifactNumToKeepStr: '10'))
+        // Add timestamps in console log
         timestamps()
-        // Timeout to prevent hanging builds
+        // Stop build if it runs more than 1 hour
         timeout(time: 1, unit: 'HOURS')
     }
 
@@ -22,6 +24,7 @@ pipeline {
             steps {
                 script {
                     echo "=== Installing Node.js Dependencies ==="
+                    // Run npm install inside a Node.js container
                     sh '''
                       docker run --rm \
                         -v $PWD:/app \
@@ -37,6 +40,8 @@ pipeline {
             steps {
                 script {
                     echo "=== Running Application Tests ==="
+                    // Run npm test inside Node.js container
+                    // If tests fail, continue but log message
                     sh '''
                       docker run --rm \
                         -v $PWD:/app \
@@ -53,7 +58,7 @@ pipeline {
                 script {
                     echo "=== Running Snyk Dependency Vulnerability Scan ==="
                     
-                    // Run Snyk test and capture results
+                    // Run Snyk scan and save JSON report
                     def snykResult = sh(
                         script: '''
                           docker run --rm \
@@ -63,7 +68,7 @@ pipeline {
                             snyk/snyk:node \
                             snyk test --json --severity-threshold=high > snyk-report.json || true
                           
-                          # Also generate human-readable report
+                          # Also print results in terminal
                           docker run --rm \
                             -v $PWD:/app \
                             -w /app \
@@ -74,10 +79,10 @@ pipeline {
                         returnStatus: true
                     )
                     
-                    // Archive the Snyk JSON report
+                    // Save the Snyk report file in Jenkins artifacts
                     archiveArtifacts artifacts: 'snyk-report.json', allowEmptyArchive: true
                     
-                    // Check if High/Critical vulnerabilities were found
+                    // Fail pipeline if High or Critical issues found
                     if (snykResult != 0) {
                         error """
                         SECURITY SCAN FAILED!
@@ -96,6 +101,7 @@ pipeline {
             steps {
                 script {
                     echo "=== Building Docker Image ==="
+                    // Build Docker image from Dockerfile
                     sh '''
                       docker build -t $IMAGE_NAME:$IMAGE_TAG .
                     '''
@@ -107,6 +113,7 @@ pipeline {
             steps {
                 script {
                     echo "=== Pushing Docker Image to Registry ==="
+                    // Login to DockerHub using Jenkins credentials
                     withCredentials([usernamePassword(credentialsId: 'dockerhub-creds', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
                         sh '''
                           echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
@@ -122,7 +129,7 @@ pipeline {
     post {
         always {
             echo "=== Pipeline Execution Completed ==="
-            // Clean up workspace 
+            // Clean up workspace after build
             cleanWs(deleteDirs: true, patterns: [[pattern: 'node_modules', type: 'INCLUDE']])
         }
         success {
