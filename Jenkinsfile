@@ -24,12 +24,13 @@ pipeline {
             steps {
                 script {
                     echo "=== Installing Node.js Dependencies ==="
+                    // Run npm install inside a Node.js container
                     sh '''
-                    docker run --rm \
-                        -v ${WORKSPACE}/aws-elastic-beanstalk-express-js-sample:/app \
+                      docker run --rm \
+                        -v $PWD:/app \
                         -w /app \
                         node:16 \
-                        sh -c "node -v && npm install"
+                        npm install --save
                     '''
                 }
             }
@@ -43,10 +44,10 @@ pipeline {
                     // If tests fail, continue but log message
                     sh '''
                       docker run --rm \
-                        -v ${WORKSPACE}:/app \
+                        -v $PWD:/app \
                         -w /app \
                         node:16 \
-                        sh -c "npm test || echo 'Tests failed or skipped'"
+                        npm test || echo "Tests failed or skipped"
                     '''
                 }
             }
@@ -61,7 +62,7 @@ pipeline {
                     def snykResult = sh(
                         script: '''
                           docker run --rm \
-                            -v ${WORKSPACE}:/app \
+                            -v $PWD:/app \
                             -w /app \
                             -e SNYK_TOKEN=$SNYK_TOKEN \
                             snyk/snyk:node \
@@ -69,7 +70,7 @@ pipeline {
                           
                           # Also print results in terminal
                           docker run --rm \
-                            -v ${WORKSPACE}:/app \
+                            -v $PWD:/app \
                             -w /app \
                             -e SNYK_TOKEN=$SNYK_TOKEN \
                             snyk/snyk:node \
