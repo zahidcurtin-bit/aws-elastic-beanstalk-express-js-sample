@@ -42,7 +42,7 @@ pipeline {
                         -v $PWD:/app \
                         -w /app \
                         node:16 \
-                        npm test || echo "⚠️ Tests failed or skipped"
+                        npm test || echo "Tests failed or skipped"
                     '''
                 }
             }
@@ -80,13 +80,13 @@ pipeline {
                     // Check if High/Critical vulnerabilities were found
                     if (snykResult != 0) {
                         error """
-                        ❌ SECURITY SCAN FAILED!
+                        SECURITY SCAN FAILED!
                         High or Critical vulnerabilities detected by Snyk.
                         Check the snyk-report.json artifact for details.
                         Pipeline execution halted.
                         """
                     } else {
-                        echo "✅ No High/Critical vulnerabilities detected"
+                        echo "No High/Critical vulnerabilities detected"
                     }
                 }
             }
@@ -126,13 +126,13 @@ pipeline {
             cleanWs(deleteDirs: true, patterns: [[pattern: 'node_modules', type: 'INCLUDE']])
         }
         success {
-            echo "✅ Pipeline executed successfully! All stages passed."
+            echo "Pipeline executed successfully! All stages passed."
         }
         failure {
-            echo "❌ Pipeline failed. Check logs for details."
+            echo "Pipeline failed. Check logs for details."
         }
         unstable {
-            echo "⚠️ Pipeline completed with warnings."
+            echo "Pipeline completed with warnings."
         }
     }
 }
