@@ -30,7 +30,7 @@ pipeline {
                         -v $PWD:/app \
                         -w /app \
                         node:16 \
-                        npm install
+                        sh -c "node -v && npm install --save"
                     '''
                 }
             }
@@ -47,7 +47,7 @@ pipeline {
                         -v $PWD:/app \
                         -w /app \
                         node:16 \
-                        npm test || echo "Tests failed or skipped"
+                        sh -c "npm test || echo 'Tests failed or skipped'"
                     '''
                 }
             }
