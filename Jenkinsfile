@@ -2,11 +2,15 @@ pipeline {
     agent any
 
     environment {
+        // Docker-in-Docker configuration (matches docker-compose.yml from Task 2)
+        DOCKER_HOST       = 'tcp://docker:2376'
+        DOCKER_CERT_PATH  = '/certs/client'
+        DOCKER_TLS_VERIFY = '1'
+        
         // Docker registry configuration
         DOCKER_USERNAME = "zahidsajif"
         IMAGE_NAME = "${DOCKER_USERNAME}/aws-node-app"
         IMAGE_TAG = "build-${env.BUILD_NUMBER}"
-        SNYK_TOKEN = credentials('snyk-api-token')
     }
 
     options {
@@ -32,10 +36,9 @@ pipeline {
             steps {
                 echo "=== Installing Node.js Dependencies ==="
                 script {
-                    // Use $(pwd) instead of $WORKSPACE for Docker socket mounting
                     sh '''
                       docker run --rm \
-                        -v "$(pwd)":/app \
+                        -v "$WORKSPACE":/app \
                         -w /app \
                         node:16-alpine \
                         sh -c "node -v && npm -v && npm install --save"
@@ -50,7 +53,7 @@ pipeline {
                 script {
                     sh '''
                       docker run --rm \
-                        -v "$(pwd)":/app \
+                        -v "$WORKSPACE":/app \
                         -w /app \
                         node:16-alpine \
                         sh -c "npm test || echo 'Tests failed or skipped'"
@@ -68,38 +71,39 @@ pipeline {
             steps {
                 echo "=== Running Snyk Dependency Vulnerability Scan ==="
                 script {
-                    def snykResult = sh(
-                        script: '''
-                          docker run --rm \
-                            -e SNYK_TOKEN="$SNYK_TOKEN" \
-                            -v "$(pwd)":/app \
-                            -w /app \
-                            snyk/snyk:node \
-                            snyk test \
-                            --file=package.json \
-                            --severity-threshold=high \
-                            --json-file-output=/app/snyk-report.json || true
-                          
-                          # Print results to console
-                          docker run --rm \
-                            -e SNYK_TOKEN="$SNYK_TOKEN" \
-                            -v "$(pwd)":/app \
-                            -w /app \
-                            snyk/snyk:node \
-                            snyk test \
-                            --file=package.json \
-                            --severity-threshold=high || true
-                        ''',
-                        returnStatus: true
-                    )
-                    
-                    archiveArtifacts artifacts: 'snyk-report.json', allowEmptyArchive: true
-                    
-                    if (snykResult != 0) {
-                        unstable(message: "High or Critical vulnerabilities detected by Snyk")
-                        echo "⚠️  WARNING: Security vulnerabilities found. Check snyk-report.json"
-                    } else {
-                        echo "✅ No High/Critical vulnerabilities detected"
+                    withCredentials([string(credentialsId: 'snyk-api-token', variable: 'SNYK_TOKEN')]) {
+                        def snykResult = sh(
+                            script: '''
+                              docker run --rm \
+                                -e SNYK_TOKEN="$SNYK_TOKEN" \
+                                -v "$WORKSPACE":/app \
+                                -w /app \
+                                snyk/snyk:node \
+                                snyk test \
+                                --file=package.json \
+                                --severity-threshold=high \
+                                --json-file-output=/app/snyk-report.json || true
+                              
+                              docker run --rm \
+                                -e SNYK_TOKEN="$SNYK_TOKEN" \
+                                -v "$WORKSPACE":/app \
+                                -w /app \
+                                snyk/snyk:node \
+                                snyk test \
+                                --file=package.json \
+                                --severity-threshold=high || echo "Snyk found vulnerabilities"
+                            ''',
+                            returnStatus: true
+                        )
+                        
+                        archiveArtifacts artifacts: 'snyk-report.json', allowEmptyArchive: true
+                        
+                        if (snykResult != 0) {
+                            unstable(message: "High or Critical vulnerabilities detected by Snyk")
+                            echo "WARNING: Security vulnerabilities found. Check snyk-report.json artifact"
+                        } else {
+                            echo "No High/Critical vulnerabilities detected"
+                        }
                     }
                 }
             }
@@ -113,13 +117,14 @@ pipeline {
                       docker build -t "$IMAGE_NAME:$IMAGE_TAG" .
                       docker tag "$IMAGE_NAME:$IMAGE_TAG" "$IMAGE_NAME:latest"
                     '''
+                    echo "Docker image built: $IMAGE_NAME:$IMAGE_TAG"
                 }
             }
         }
 
         stage('Push Docker Image') {
             steps {
-                echo "=== Pushing Docker Image to Registry ==="
+                echo "=== Pushing Docker Image to Docker Hub ==="
                 script {
                     withCredentials([usernamePassword(credentialsId: 'dockerhub-creds', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
                         sh '''
@@ -128,6 +133,7 @@ pipeline {
                           docker push "$IMAGE_NAME:latest"
                           docker logout
                         '''
+                        echo "Images pushed: $IMAGE_NAME:$IMAGE_TAG and $IMAGE_NAME:latest"
                     }
                 }
             }
@@ -141,20 +147,13 @@ pipeline {
             cleanWs(deleteDirs: true, patterns: [[pattern: 'node_modules', type: 'INCLUDE']])
         }
         success {
-            echo """
-            ✅ BUILD SUCCESSFUL
-            Image: $IMAGE_NAME:$IMAGE_TAG
-            All stages completed successfully.
-            """
+            echo "BUILD SUCCESSFUL - Image: $IMAGE_NAME:$IMAGE_TAG"
         }
         failure {
-            echo """
-            ❌ BUILD FAILED
-            Check the console output above for error details.
-            """
+            echo "BUILD FAILED - Check console output for details"
         }
         unstable {
-            echo "⚠️  Build completed with warnings (e.g., security vulnerabilities found)"
+            echo "BUILD UNSTABLE - Warnings detected (e.g., security vulnerabilities)"
         }
     }
 }
