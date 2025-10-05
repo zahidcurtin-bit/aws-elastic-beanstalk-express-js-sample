@@ -3,7 +3,6 @@ pipeline {
 
     environment {
         // Docker configuration
-        DOCKER_REGISTRY = "docker.io"
         DOCKER_USERNAME = "zahidsajif"
         IMAGE_NAME = "${DOCKER_USERNAME}/node-docker"
         IMAGE_TAG = "${env.BRANCH_NAME}-${env.BUILD_NUMBER}"
@@ -38,12 +37,15 @@ pipeline {
             steps {
                 echo '=== Installing Node.js Dependencies ==='
                 script {
-                    docker.image('node:16-alpine').inside('-u root') {
-                        sh 'node -v'
-                        sh 'npm -v'
-                        sh 'npm install --save'
-                        echo 'Dependencies installed and saved to package.json'
-                    }
+                    // Use docker run instead of .inside() for DinD compatibility
+                    sh '''
+                        docker run --rm \
+                          -v "$WORKSPACE":/app \
+                          -w /app \
+                          node:16-alpine \
+                          sh -c "node -v && npm -v && npm install --save"
+                    '''
+                    echo '✅ Dependencies installed and saved to package.json'
                 }
             }
         }
@@ -52,9 +54,19 @@ pipeline {
             steps {
                 echo '=== Running Application Tests ==='
                 script {
-                    docker.image('node:16-alpine').inside('-u root') {
-                        sh 'npm test || echo "Tests failed or skipped"'
-                    }
+                    sh '''
+                        docker run --rm \
+                          -v "$WORKSPACE":/app \
+                          -w /app \
+                          node:16-alpine \
+                          sh -c "npm test || echo 'Tests failed or skipped'"
+                    '''
+                }
+            }
+            post {
+                always {
+                    // Collect JUnit test results if available
+                    junit allowEmptyResults: true, testResults: '**/junit*.xml'
                 }
             }
         }
@@ -67,7 +79,7 @@ pipeline {
                     def snykResult = sh(
                         script: '''
                             docker run --rm \
-                              -v $PWD:/app \
+                              -v "$WORKSPACE":/app \
                               -w /app \
                               -e SNYK_TOKEN=$SNYK_TOKEN \
                               snyk/snyk:node \
@@ -75,7 +87,7 @@ pipeline {
                             
                             # Display results in console
                             docker run --rm \
-                              -v $PWD:/app \
+                              -v "$WORKSPACE":/app \
                               -w /app \
                               -e SNYK_TOKEN=$SNYK_TOKEN \
                               snyk/snyk:node \
@@ -90,13 +102,13 @@ pipeline {
                     // Fail pipeline on high/critical vulnerabilities
                     if (snykResult != 0) {
                         error """
-                        SECURITY SCAN FAILED!
+                        ❌ SECURITY SCAN FAILED!
                         High or Critical vulnerabilities detected by Snyk.
                         Review the snyk-report.json artifact for details.
                         Pipeline execution halted for security reasons.
                         """
                     } else {
-                        echo "No High/Critical vulnerabilities detected"
+                        echo "✅ No High/Critical vulnerabilities detected"
                     }
                 }
             }
@@ -112,7 +124,7 @@ pipeline {
                           -t ${IMAGE_NAME}:latest \
                           .
                     """
-                    echo "Built image: ${IMAGE_NAME}:${IMAGE_TAG}"
+                    echo "✅ Built image: ${IMAGE_NAME}:${IMAGE_TAG}"
                 }
             }
         }
@@ -133,7 +145,7 @@ pipeline {
                             docker logout
                         '''
                     }
-                    echo "Pushed image: ${IMAGE_NAME}:${IMAGE_TAG}"
+                    echo "✅ Pushed image: ${IMAGE_NAME}:${IMAGE_TAG}"
                 }
             }
         }
@@ -142,26 +154,26 @@ pipeline {
     post {
         always {
             echo '=== Pipeline Execution Completed ==='
-            // Archive npm logs if they exist
-            archiveArtifacts artifacts: '**/npm-debug.log', allowEmptyArchive: true
+            // Archive logs and Dockerfile
+            archiveArtifacts artifacts: '**/npm-debug.log, Dockerfile', allowEmptyArchive: true
             // Clean up workspace
             cleanWs(deleteDirs: true, patterns: [[pattern: 'node_modules', type: 'INCLUDE']])
         }
         success {
             echo """
-            BUILD SUCCESSFUL
+            ✅ BUILD SUCCESSFUL
             Image: ${IMAGE_NAME}:${IMAGE_TAG}
             All stages passed including security checks.
             """
         }
         failure {
             echo """
-            BUILD FAILED
+            ❌ BUILD FAILED
             Check the console output above for error details.
             """
         }
         unstable {
-            echo "Pipeline completed with warnings."
+            echo "⚠️ Pipeline completed with warnings."
         }
     }
 }
