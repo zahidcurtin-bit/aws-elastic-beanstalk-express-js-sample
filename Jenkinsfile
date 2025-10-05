@@ -1,76 +1,138 @@
+// Jenkinsfile - Node.js CI/CD with Snyk Security Scan
 pipeline {
-    agent {
-        docker {
-            image 'docker:latest'
-            args '-v /var/run/docker.sock:/var/run/docker.sock'
-        }
+  agent any
+  
+  environment {
+    // Talk to Docker-in-Docker (DinD) over TLS
+    DOCKER_HOST       = 'tcp://docker:2376'
+    DOCKER_CERT_PATH  = '/certs/client'
+    DOCKER_TLS_VERIFY = '1'
+    
+    // Docker Hub configuration
+    IMAGE_NAME = 'zahidsajif/aws-node-app'
+    TAG        = "build-${env.BUILD_NUMBER}" 
+    
+    // Application directory (change if package.json is in a subfolder)
+    APP_DIR = '.'
+  }
+  
+  options { 
+    timestamps() 
+    buildDiscarder(logRotator(numToKeepStr: '10'))
+  }
+  
+  stages {
+    stage('Checkout SCM') {
+      steps {
+        echo "✅ Source code has been checked out by Jenkins SCM."
+        sh 'ls -la'
+        sh 'pwd'
+      }
     }
     
-    options {
-        timeout(time: 1, unit: 'HOURS')
+    stage('Install Dependencies (Node 16)') {
+      steps {
+        echo "📦 Installing Node.js dependencies..."
+        sh '''
+          docker run --rm \
+            -v "$WORKSPACE":/app -w /app \
+            node:16 \
+            sh -c "node -v && npm -v && npm install --save"
+        '''
+        sh 'ls -la node_modules || echo "node_modules not found"'
+      }
     }
     
-    stages {
-        stage('Build and Tag') {
-            steps {
-                echo "🔨 Building Docker image: getting-started:${BUILD_NUMBER}"
-                sh """
-                    docker build -t getting-started:${BUILD_NUMBER} .
-                    docker tag getting-started:${BUILD_NUMBER} zahidsajif/docker-study:${BUILD_NUMBER}
-                    docker tag getting-started:${BUILD_NUMBER} zahidsajif/docker-study:latest
-                """
-            }
+    stage('Run Tests (Node 16)') {
+      steps {
+        echo "🧪 Running tests..."
+        sh '''
+          docker run --rm \
+            -v "$WORKSPACE":/app -w /app \
+            node:16 \
+            sh -c "npm test || echo '⚠️ No tests defined or tests failed'"
+        '''
+      }
+      post {
+        always { 
+          junit allowEmptyResults: true, testResults: 'junit*.xml' 
         }
-        
-        stage('Verify Build') {
-            steps {
-                echo "✅ Verifying built images..."
-                sh """
-                    docker images | grep getting-started
-                    docker images | grep zahidsajif
-                """
-            }
-        }
-        
-        stage('Cleanup Old Builds') {
-            steps {
-                echo "🧹 Cleaning up old images (keeping last 3)"
-                sh '''
-                    # Remove old getting-started images (keep last 3)
-                    docker images getting-started --format "{{.Tag}}" | \
-                    grep -E '^[0-9]+$' | \
-                    sort -rn | \
-                    tail -n +4 | \
-                    xargs -I {} docker rmi getting-started:{} 2>/dev/null || true
-                    
-                    # Remove old zahidsajif images (keep last 3)
-                    docker images zahidsajif/docker-study --format "{{.Tag}}" | \
-                    grep -E '^[0-9]+$' | \
-                    sort -rn | \
-                    tail -n +4 | \
-                    xargs -I {} docker rmi zahidsajif/docker-study:{} 2>/dev/null || true
-                    
-                    # Remove dangling images
-                    docker image prune -f
-                    
-                    # Show disk usage
-                    echo "📊 Docker disk usage:"
-                    docker system df
-                '''
-            }
-        }
+      }
     }
     
-    post {
+    stage('Dependency Scan (Snyk)') {
+      steps {
+        echo "🔒 Running Snyk security scan..."
+        withCredentials([string(credentialsId: 'snyk_token', variable: 'SNYK_TOKEN')]) {
+          sh '''
+            docker run --rm \
+              -e SNYK_TOKEN="$SNYK_TOKEN" \
+              -v "$WORKSPACE":/app -w /app \
+              snyk/snyk:docker snyk test \
+              --file=package.json \
+              --severity-threshold=high \
+              --json-file-output=/app/snyk-result.json \
+              || echo "⚠️ Snyk found vulnerabilities"
+          '''
+        }
+      }
+      post {
         always {
-            echo '📊 Final image list:'
-            sh 'docker images | head -20'
+          sh 'cat snyk-result.json || echo "No Snyk results found"'
         }
-        success {
-            echo "✅ Build #${BUILD_NUMBER} completed successfully!"
-        }
-        failure {
-            echo "❌ Build #${BUILD_NUMBER} failed!"
-        }
+      }
     }
+    
+    stage('Build Docker Image') {
+      steps {
+        echo "🐳 Building Docker image..."
+        sh '''
+          docker build -t "$IMAGE_NAME:$TAG" .
+          docker tag "$IMAGE_NAME:$TAG" "$IMAGE_NAME:latest"
+        '''
+        sh 'docker images | grep "$IMAGE_NAME"'
+      }
+    }
+    
+    stage('Push Docker Image to Docker Hub') {
+      steps {
+        echo "📤 Pushing Docker image to Docker Hub..."
+        withCredentials([usernamePassword(
+          credentialsId: 'dockerhub-creds', 
+          usernameVariable: 'DH_USER', 
+          passwordVariable: 'DH_PASS'
+        )]) {
+          sh '''
+            echo "$DH_PASS" | docker login -u "$DH_USER" --password-stdin
+            docker push "$IMAGE_NAME:$TAG"
+            docker push "$IMAGE_NAME:latest"
+            echo "✅ Successfully pushed $IMAGE_NAME:$TAG"
+            echo "✅ Successfully pushed $IMAGE_NAME:latest"
+          '''
+        }
+      }
+      post {
+        always {
+          sh 'docker logout || true'
+        }
+      }
+    }
+  }
+  
+  post {
+    success {
+      echo "✅ Pipeline completed successfully!"
+      echo "📦 Image: $IMAGE_NAME:$TAG"
+      echo "🔗 Docker Hub: https://hub.docker.com/r/zahidsajif/aws-node-app"
+    }
+    failure {
+      echo "❌ Pipeline failed. Check the logs above."
+    }
+    always {
+      echo "📁 Archiving artifacts..."
+      archiveArtifacts artifacts: 'Dockerfile, snyk-result.json', allowEmptyArchive: true, onlyIfSuccessful: false
+      echo "🧹 Cleaning workspace..."
+      cleanWs()
+    }
+  }
 }

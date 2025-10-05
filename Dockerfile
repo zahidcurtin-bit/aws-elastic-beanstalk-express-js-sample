@@ -1,20 +1,19 @@
-# Node 16 base image    
 FROM node:16
 
 # Set working directory
-WORKDIR /usr/src/app
+WORKDIR /app
 
-# Copy package.json and package-lock.json
+# Copy package files
 COPY package*.json ./
 
-# Install dependencies
+# Install dependencies for runtime
 RUN npm install --save
 
-# Copy all source code
+# Copy rest of the source code
 COPY . .
 
-# Expose application port (default Express uses 3000)
-EXPOSE 3000
+# Expose application port
+EXPOSE 8080
 
-# Start application
+# Start app
 CMD ["npm", "start"]
