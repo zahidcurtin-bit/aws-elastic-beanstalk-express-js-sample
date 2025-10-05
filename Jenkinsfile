@@ -122,7 +122,7 @@ pipeline {
     post {
         always {
             echo "=== Pipeline Execution Completed ==="
-            // Clean up workspace if needed
+            // Clean up workspace 
             cleanWs(deleteDirs: true, patterns: [[pattern: 'node_modules', type: 'INCLUDE']])
         }
         success {
