@@ -24,13 +24,12 @@ pipeline {
             steps {
                 script {
                     echo "=== Installing Node.js Dependencies ==="
-                    // Run npm install inside a Node.js container
                     sh '''
-                      docker run --rm \
-                        -v ${WORKSPACE}:/app \
+                    docker run --rm \
+                        -v ${WORKSPACE}/aws-elastic-beanstalk-express-js-sample:/app \
                         -w /app \
                         node:16 \
-                        sh -c "node -v && npm install --save"
+                        sh -c "node -v && npm install"
                     '''
                 }
             }
